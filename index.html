@@ -11,14 +11,19 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>1-Iクラスパーカデザインメーカー</title>
-  <meta name="description" content="クラスパーカーのデザインを、画像を重ねて試せるサイト">
+  <meta name="description" content="クラスパーカーのデザインを、画像・文字・手書きを重ねて試せるサイト">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- テキスト用の日本語フォント（Google Fonts）。表示をじゃましないよう、読み込み後に有効にする -->
+  <link rel="stylesheet" crossorigin="anonymous" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&family=Noto+Serif+JP:wght@400;700&family=Zen+Maru+Gothic:wght@400;700&family=M+PLUS+Rounded+1c:wght@400;700&family=Hachi+Maru+Pop&family=Yusei+Magic&family=Potta+One&family=Dela+Gothic+One&family=RocknRoll+One&family=Reggae+One&family=DotGothic16&family=Yuji+Syuku&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
     <h1>1-Iクラスパーカデザインメーカー</h1>
-    <p>下のタブから画像を追加して、パーカーに重ねて試してみよう</p>
+    <p>下のタブから画像・文字・手書きを追加して、パーカーに重ねて試してみよう</p>
   </header>
 
   <main>
@@ -29,6 +34,8 @@
         <label><input type="radio" name="side" value="back"><span>背面</span></label>
       </fieldset>
       <div class="spacer"></div>
+      <button type="button" class="btn ghost js-undo" aria-label="元に戻す" title="元に戻す (Ctrl+Z)">↶</button>
+      <button type="button" class="btn ghost js-redo" aria-label="やり直し" title="やり直し (Ctrl+Shift+Z)">↷</button>
       <button type="button" id="clearAll" class="btn ghost">すべて消す</button>
       <button type="button" id="savePng" class="btn primary">PNGで保存</button>
     </div>
@@ -38,6 +45,7 @@
       <div class="guide v" id="guideV" hidden></div>
       <div class="guide h" id="guideH" hidden></div>
       <div class="guide r" id="guideR" hidden></div>
+      <canvas id="live" class="live" aria-hidden="true"></canvas>
       <div id="sel" class="sel" hidden>
         <button type="button" class="handle h-del" id="hDel" aria-label="このデザインを削除">×</button>
         <div class="handle h-rot" id="hRot" role="presentation" title="ドラッグで拡大縮小・回転">⤡</div>
@@ -47,9 +55,10 @@
 
     <aside id="hint" class="hint">
       <h2>デザインの調整</h2>
-      <p>パーカー上のデザインをタップすると、ここで大きさ・回転・色・背景の透明化・トリミングを調整できます。</p>
+      <p>パーカー上のデザイン（画像・文字・手書きの線）をタップすると、ここで調整できます。</p>
       <p>右下の丸いハンドルをドラッグすると拡大縮小と回転、左上の×で削除できます。</p>
       <p>動かしている間、パーカーの中心や他のデザインに近づくと、ぴたっと揃います。</p>
+      <p>下のタブの「手書き」で、ペンや指で直接描けます。描いた線は「選択」でタップすると動かせます。</p>
     </aside>
 
     <section id="panel" class="panel" hidden aria-label="選択中のデザインの設定">
@@ -65,19 +74,59 @@
         </div>
       </div>
 
-      <details class="group">
+      <!-- テキスト -->
+      <div class="group-box" data-kinds="text" hidden>
+        <h2>文字</h2>
+        <textarea id="textInput" rows="3" placeholder="ここに文字を入力" aria-label="表示する文字"></textarea>
+        <h3>フォント</h3>
+        <div class="fonts" id="fontList"></div>
+        <h3>文字の色</h3>
+        <div id="textColor"></div>
+        <div class="row">
+          <button type="button" id="tBold" class="toggle" aria-pressed="false">太字</button>
+          <button type="button" id="tVert" class="toggle" aria-pressed="false">縦書き</button>
+          <button type="button" id="tOutline" class="toggle" aria-pressed="false">縁取り</button>
+        </div>
+        <div class="row">
+          <span class="lbl">揃え</span>
+          <div class="seg-mini" id="alignSeg">
+            <button type="button" data-align="left">左</button>
+            <button type="button" data-align="center">中央</button>
+            <button type="button" data-align="right">右</button>
+          </div>
+        </div>
+        <div id="outlineOpts" hidden>
+          <h3>縁取りの色</h3>
+          <div id="outlineColor"></div>
+          <div class="field">
+            <label for="outlineW">縁取りの太さ</label>
+            <input type="range" id="outlineW" min="1" max="30" step="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- 手書きの線 -->
+      <div class="group-box" data-kinds="stroke" hidden>
+        <h2>線</h2>
+        <h3>線の色</h3>
+        <div id="strokeColor"></div>
+        <div class="field">
+          <label for="lw">線の太さ</label>
+          <input type="range" id="lw" min="1" max="30" step="1">
+        </div>
+      </div>
+
+      <!-- 画像 -->
+      <details class="group" data-kinds="image" hidden>
         <summary>色を変える</summary>
         <p class="note">画像の形（透明な部分と、透明にした背景以外）を一色で塗ります。</p>
-        <div class="swatches" id="presets"></div>
+        <div id="tintPicker"></div>
         <div class="row">
-          <label class="color-pick">好きな色
-            <input type="color" id="tint" value="#e53935">
-          </label>
           <button type="button" id="tintReset" class="btn ghost">元の色に戻す</button>
         </div>
       </details>
 
-      <details class="group">
+      <details class="group" data-kinds="image" hidden>
         <summary>背景を透明にする</summary>
         <p class="note">下の画像をクリックして、透明にしたい色（白でも他の色でも）を選びます。</p>
         <canvas id="bgPreview" class="bg-preview" aria-label="透明にする色を選ぶための元画像"></canvas>
@@ -92,7 +141,7 @@
         </div>
       </details>
 
-      <details class="group" id="cropGroup">
+      <details class="group" id="cropGroup" data-kinds="image" hidden>
         <summary>トリミング</summary>
         <p class="note">四角の枠の辺や角をドラッグして、残したい範囲を選びます。枠の中をドラッグすると枠ごと動かせます。</p>
         <div class="crop" id="crop">
@@ -121,15 +170,47 @@
     </section>
   </main>
 
-  <nav class="tabbar" aria-label="デザイン画像">
-    <div class="tabs">
-      <span class="tab-label">マイデザイン</span>
+  <nav class="tabbar" id="tabbar" aria-label="追加するデザイン">
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab" role="tab" data-tab="image" aria-selected="true">画像</button>
+      <button type="button" class="tab" role="tab" data-tab="text" aria-selected="false">テキスト</button>
+      <button type="button" class="tab" role="tab" data-tab="draw" aria-selected="false">手書き</button>
+    </div>
+
+    <div class="tabpane" data-pane="image" role="tabpanel">
       <label class="btn primary add">
         ＋ 画像を追加
         <input type="file" id="file" accept="image/*" multiple hidden>
       </label>
+      <div id="tray" class="tray"></div>
     </div>
-    <div id="tray" class="tray"></div>
+
+    <div class="tabpane" data-pane="text" role="tabpanel" hidden>
+      <button type="button" id="addText" class="btn primary">＋ テキストを追加</button>
+      <span class="pane-note">追加すると右（スマホでは下）のパネルで、文字・フォント・色・縁取りを変えられます。</span>
+    </div>
+
+    <div class="tabpane draw-pane" data-pane="draw" role="tabpanel" hidden>
+      <div class="tools" id="tools" role="group" aria-label="手書きのツール">
+        <button type="button" data-tool="select" aria-pressed="false">↖ 選択</button>
+        <button type="button" data-tool="pen" aria-pressed="true">✎ ペン</button>
+        <button type="button" data-tool="line" aria-pressed="false">／ 直線</button>
+        <button type="button" data-tool="rect" aria-pressed="false">□ 四角</button>
+        <button type="button" data-tool="ellipse" aria-pressed="false">○ 丸</button>
+        <button type="button" data-tool="eraser" aria-pressed="false">⌫ 消しゴム</button>
+      </div>
+      <div class="draw-opts">
+        <div id="drawColor" class="draw-color"></div>
+        <label class="draw-w" id="drawWRow">
+          <span id="drawWLabel">太さ</span>
+          <input type="range" id="drawW" min="1" max="30" step="1">
+        </label>
+      </div>
+      <div class="hist">
+        <button type="button" class="btn ghost js-undo">↶ 元に戻す</button>
+        <button type="button" class="btn ghost js-redo">↷ やり直し</button>
+      </div>
+    </div>
   </nav>
 
   <script src="app.js"></script>
