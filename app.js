@@ -21,6 +21,10 @@
   const HIT_PX = 8;          // 細い線・文字をタップしやすくする余裕(px)
   const HISTORY_MAX = 60;
   const TEXT_REF = 100;      // 文字の配置を計算するときの基準フォントサイズ
+  const RECENT_KEY = 'parka-recent-colors';
+  const RECENT_MAX = 8;
+  const SAVE_DELAY = 700;    // 自動保存までの待ち時間(ms)
+  const DB_NAME = 'parka-1i';
 
   const COLORS = [
     ['#ffffff', '白'], ['#111111', '黒'], ['#e53935', '赤'], ['#1e5bd8', '青'],
@@ -34,6 +38,53 @@
     ['Potta One', 'ぽってり'], ['Dela Gothic One', '極太'], ['RocknRoll One', 'ロック'],
     ['Reggae One', 'インパクト'], ['DotGothic16', 'ドット'], ['Yuji Syuku', '筆明朝'],
   ];
+
+  // スタンプの図形（100×100 の中に収めた SVG パス）
+  const polyPath = (pts) => `M${pts.map((p) => p.join(' ')).join(' L')} Z`;
+  const fix = (n) => Math.round(n * 100) / 100;
+  const polar = (cx, cy, r, deg) => [fix(cx + r * Math.cos((deg * Math.PI) / 180)), fix(cy + r * Math.sin((deg * Math.PI) / 180))];
+  const starPath = (n, R, r, cx = 50, cy = 50) => polyPath(
+    Array.from({ length: n * 2 }, (_, i) => polar(cx, cy, i % 2 === 0 ? R : r, (180 * i) / n - 90)),
+  );
+  const circlePath = (cx, cy, r) => `M${cx - r} ${cy} A${r} ${r} 0 1 0 ${cx + r} ${cy} A${r} ${r} 0 1 0 ${cx - r} ${cy} Z`;
+  const sunPath = () => circlePath(50, 50, 24) + Array.from({ length: 8 }, (_, k) => polyPath([
+    polar(50, 50, 47, k * 45), polar(50, 50, 33, k * 45 - 10), polar(50, 50, 33, k * 45 + 10),
+  ])).join('');
+  const flowerPath = () => Array.from({ length: 6 }, (_, k) => {
+    const [x, y] = polar(50, 50, 27, k * 60 - 90);
+    return circlePath(x, y, 19);
+  }).join('') + circlePath(50, 50, 16);
+
+  const STAMPS = [
+    { id: 'heart', label: 'ハート', d: 'M50 90 C18 66 6 48 6 31 C6 17 17 7 30 7 C39 7 46 12 50 20 C54 12 61 7 70 7 C83 7 94 17 94 31 C94 48 82 66 50 90 Z' },
+    { id: 'star', label: '星', d: starPath(5, 48, 20, 50, 53) },
+    { id: 'burst', label: 'バースト', d: starPath(12, 48, 35) },
+    { id: 'sparkle', label: 'キラキラ', d: 'M50 4 C54 34 66 46 96 50 C66 54 54 66 50 96 C46 66 34 54 4 50 C34 46 46 34 50 4 Z' },
+    { id: 'circle', label: '丸', d: circlePath(50, 50, 44) },
+    { id: 'ring', label: 'リング', d: circlePath(50, 50, 44) + circlePath(50, 50, 28), rule: 'evenodd' },
+    { id: 'square', label: '四角', d: 'M14 6 H86 A8 8 0 0 1 94 14 V86 A8 8 0 0 1 86 94 H14 A8 8 0 0 1 6 86 V14 A8 8 0 0 1 14 6 Z' },
+    { id: 'triangle', label: '三角', d: polyPath([[50, 8], [94, 88], [6, 88]]) },
+    { id: 'diamond', label: 'ダイヤ', d: polyPath([[50, 4], [94, 50], [50, 96], [6, 50]]) },
+    { id: 'hexagon', label: '六角形', d: polyPath([0, 60, 120, 180, 240, 300].map((a) => polar(50, 50, 46, a))) },
+    { id: 'flower', label: '花', d: flowerPath() },
+    { id: 'sun', label: '太陽', d: sunPath() },
+    { id: 'moon', label: '月', d: 'M58 6 A44 44 0 1 0 94 64 A36 36 0 0 1 58 6 Z' },
+    { id: 'cloud', label: '雲', d: 'M26 82 A20 20 0 0 1 22 42 A24 24 0 0 1 66 30 A24 24 0 0 1 78 82 Z' },
+    { id: 'bolt', label: 'いなずま', d: polyPath([[58, 4], [18, 56], [46, 56], [38, 96], [84, 38], [54, 38]]) },
+    { id: 'crown', label: '王冠', d: polyPath([[8, 82], [8, 26], [30, 50], [50, 18], [70, 50], [92, 26], [92, 82]]) },
+    { id: 'bubble', label: '吹き出し', d: 'M50 10 C75 10 94 26 94 45 C94 64 75 80 50 80 C46 80 42 80 38 79 L18 92 L24 74 C13 67 6 56 6 45 C6 26 25 10 50 10 Z' },
+    { id: 'bubble2', label: '角の吹き出し', d: 'M14 10 H86 A8 8 0 0 1 94 18 V62 A8 8 0 0 1 86 70 H48 L26 92 L30 70 H14 A8 8 0 0 1 6 62 V18 A8 8 0 0 1 14 10 Z' },
+    { id: 'arrow', label: '矢印', d: polyPath([[4, 36], [56, 36], [56, 12], [96, 50], [56, 88], [56, 64], [4, 64]]) },
+    { id: 'check', label: 'チェック', d: polyPath([[8, 54], [22, 40], [40, 58], [78, 16], [92, 30], [40, 86]]) },
+    { id: 'plus', label: 'プラス', d: polyPath([[38, 6], [62, 6], [62, 38], [94, 38], [94, 62], [62, 62], [62, 94], [38, 94], [38, 62], [6, 62], [6, 38], [38, 38]]) },
+    { id: 'note', label: '音符', d: 'M44 8 L54 8 C58 30 84 34 80 58 C76 44 62 42 54 38 V76 A17 13 0 1 1 44 66 Z' },
+    { id: 'paw', label: '肉球', d: circlePath(22, 42, 11) + circlePath(40, 24, 11) + circlePath(60, 24, 11) + circlePath(78, 42, 11)
+      + 'M50 46 C66 46 80 62 80 76 C80 88 70 92 50 92 C30 92 20 88 20 76 C20 62 34 46 50 46 Z' },
+    { id: 'smile', label: 'にっこり', d: circlePath(50, 50, 44) + circlePath(35, 40, 7) + circlePath(65, 40, 7) + 'M25 58 Q50 94 75 58 Q50 76 25 58 Z', rule: 'evenodd' },
+  ].map((st) => ({ ...st, path: new Path2D(st.d) }));
+  const STAMP_MAP = Object.fromEntries(STAMPS.map((st) => [st.id, st]));
+
+  const EMOJIS = [...'😀😂😍😎🥳🤩😆🥰😜🤗😭😡🥺😴🤔👍👏🙌💪🔥✨💯🎉🎊🏆🥇👑⭐🌟💖❤🧡💛💚💙💜🖤🤍🎵🎶⚽🏀⚾🏐🎨📚✏🎒🍀🌸🌻🌈☀🌙🐶🐱🐼🦁🐰🦊🐯🐻🍎🍕🍔🍰🍦'];
 
   // 縦書きで90°回す文字 / 右上に寄せる句読点 / 少し寄せる小さい仮名
   const V_ROTATE = new Set([...'ー―—–-−〜～~…⋯（）()［］[]「」『』【】〈〉《》｛｝{}<>＜＞:：=＝']);
@@ -62,8 +113,9 @@
     nextItemId: 1,
     tab: 'image',
     tool: 'pen',
-    pen: { color: '#111111', width: 6 },
+    pen: { color: '#111111', width: 6, fill: false },
     eraserSize: 8,
+    stampColor: '#e53935',
   };
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -97,11 +149,64 @@
 
   /* ---------- 色えらび（パネル・手書きバー共通） ---------- */
 
+  // 色の変換（h: 0〜360, s・l: 0〜1）
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    let h = 0, s = 0;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    return [h, s, l];
+  }
+
+  function hslToRgb(h, s, l) {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+      : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+
+  const toHex = (rgb) => `#${rgb.map((v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('')}`;
+  const hexToHsl = (hex) => rgbToHsl(...hexToRgb(hex));
+
+  // 「その他の色」で選んだ色を、あとからワンタップで選べるように覚えておく
+  const pickers = [];
+  const loadRecent = () => {
+    try {
+      const a = JSON.parse(localStorage.getItem(RECENT_KEY));
+      return Array.isArray(a) ? a.filter((x) => /^#[0-9a-f]{6}$/i.test(x)).slice(0, RECENT_MAX) : [];
+    } catch {
+      return [];
+    }
+  };
+  let recent = loadRecent();
+
+  function addRecent(hex) {
+    const h = hex.toLowerCase();
+    recent = [h, ...recent.filter((x) => x !== h)].slice(0, RECENT_MAX);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(recent)); } catch { /* 保存できなくても困らない */ }
+    for (const pk of pickers) pk.refreshRecent();
+  }
+
+  // onPick(hex) は、色を選ぶたび（スライダーを動かしている最中も）呼ばれる
   function makeColorPicker(root, onPick) {
     root.classList.add('cp');
+    let current = '#e53935';
+    let fromSlider = false;
+    let recentTimer = 0;
+
     const swatches = document.createElement('div');
     swatches.className = 'swatches';
-    for (const [hex, name] of COLORS) {
+    const makeSwatch = (hex, name) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'swatch';
@@ -110,23 +215,119 @@
       b.title = name;
       b.setAttribute('aria-label', `${name}にする`);
       b.addEventListener('click', () => onPick(hex));
-      swatches.append(b);
+      return b;
+    };
+    for (const [hex, name] of COLORS) swatches.append(makeSwatch(hex, name));
+
+    const otherBtn = document.createElement('button');
+    otherBtn.type = 'button';
+    otherBtn.className = 'other-btn';
+    otherBtn.setAttribute('aria-expanded', 'false');
+    otherBtn.innerHTML = '<i class="rainbow"></i>その他の色';
+
+    const recentRow = document.createElement('div');
+    recentRow.className = 'recent';
+
+    const custom = document.createElement('div');
+    custom.className = 'cp-custom';
+    custom.hidden = true;
+    const sliders = {};
+    for (const [key, label, max] of [['h', '色合い', 360], ['s', '鮮やかさ', 100], ['l', '明るさ', 100]]) {
+      const row = document.createElement('label');
+      row.className = 'cp-row';
+      const name = document.createElement('span');
+      name.textContent = label;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = '0';
+      input.max = String(max);
+      input.step = '1';
+      input.setAttribute('aria-label', label);
+      row.append(name, input);
+      custom.append(row);
+      sliders[key] = input;
     }
-    const label = document.createElement('label');
-    label.className = 'color-pick';
-    label.append('好きな色');
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = '#e53935';
-    input.addEventListener('input', () => onPick(input.value));
-    label.append(input);
-    root.append(swatches, label);
-    return {
+    const preview = document.createElement('div');
+    preview.className = 'cp-preview';
+    const chip = document.createElement('i');
+    const code = document.createElement('span');
+    preview.append(chip, code);
+    custom.append(preview);
+
+    const showCustom = (hex) => {
+      const [h, sat, l] = hexToHsl(hex);
+      sliders.h.value = String(Math.round(h));
+      sliders.s.value = String(Math.round(sat * 100));
+      sliders.l.value = String(Math.round(l * 100));
+      paintTracks();
+      chip.style.background = hex;
+      code.textContent = hex;
+    };
+    const paintTracks = () => {
+      const h = Number(sliders.h.value), sat = Number(sliders.s.value), l = Number(sliders.l.value);
+      sliders.s.style.background = `linear-gradient(to right, hsl(${h} 0% ${l}%), hsl(${h} 100% ${l}%))`;
+      sliders.l.style.background = `linear-gradient(to right, #000, hsl(${h} ${sat}% 50%), #fff)`;
+    };
+    const fromSliders = () => toHex(hslToRgb(
+      Number(sliders.h.value), Number(sliders.s.value) / 100, Number(sliders.l.value) / 100,
+    ));
+
+    for (const input of Object.values(sliders)) {
+      input.addEventListener('input', () => {
+        const hex = fromSliders();
+        paintTracks();
+        chip.style.background = hex;
+        code.textContent = hex;
+        fromSlider = true;
+        onPick(hex);
+        fromSlider = false;
+        clearTimeout(recentTimer);
+        recentTimer = setTimeout(() => addRecent(hex), 500);
+      });
+      input.addEventListener('change', () => {
+        clearTimeout(recentTimer);
+        addRecent(fromSliders());
+      });
+    }
+
+    otherBtn.addEventListener('click', () => {
+      custom.hidden = !custom.hidden;
+      otherBtn.setAttribute('aria-expanded', String(!custom.hidden));
+      if (!custom.hidden) showCustom(current);
+    });
+
+    const refreshRecent = () => {
+      recentRow.replaceChildren();
+      recentRow.hidden = !recent.length;
+      if (!recent.length) return;
+      const lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = '最近使った色';
+      const list = document.createElement('div');
+      list.className = 'swatches';
+      for (const hex of recent) list.append(makeSwatch(hex, hex));
+      recentRow.append(lbl, list);
+      for (const b of list.children) b.classList.toggle('on', b.dataset.hex === current);
+    };
+
+    const row = document.createElement('div');
+    row.className = 'cp-main';
+    row.append(swatches, otherBtn);
+    root.append(row, custom, recentRow);
+
+    const picker = {
+      refreshRecent,
       set(hex) {
-        for (const b of swatches.children) b.classList.toggle('on', b.dataset.hex === hex);
-        if (hex) input.value = hex;
+        if (hex) current = hex;
+        for (const list of [swatches, recentRow.querySelector('.swatches')]) {
+          if (list) for (const b of list.children) b.classList.toggle('on', b.dataset.hex === hex);
+        }
+        if (hex && !custom.hidden && !fromSlider) showCustom(hex);
       },
     };
+    pickers.push(picker);
+    refreshRecent();
+    return picker;
   }
 
   /* ---------- 履歴（元に戻す・やり直し） ---------- */
@@ -135,14 +336,15 @@
   const pathIds = new WeakMap();
   let pathSeq = 0;
 
+  // 入れ子のデータはコピーして持つ（線の点列 paths と画像 upload は変更しない前提なので参照のまま）
+  const cloneValue = (v) => (v && typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v);
   function snapshotOf(item) {
-    const { el, canvas, ...rest } = item;
-    return {
-      ...rest,
-      crop: rest.crop && { ...rest.crop },
-      bg: rest.bg && { ...rest.bg },
-      outline: rest.outline && { ...rest.outline },
-    };
+    const out = {};
+    for (const [k, v] of Object.entries(item)) {
+      if (k === 'el' || k === 'canvas') continue;
+      out[k] = k === 'paths' || k === 'upload' ? v : cloneValue(v);
+    }
+    return out;
   }
 
   // 同じ状態かどうかを比べるための文字列（paths は参照の同一性で比べる）
@@ -167,22 +369,16 @@
     if (history.stack.length > HISTORY_MAX) history.stack.shift();
     history.index = history.stack.length - 1;
     updateHistoryUI();
+    scheduleSave();
   }
 
-  function restore(snap) {
+  function restore(snaps) {
     const prevId = state.selected && state.selected.id;
     for (const it of state.items) it.el.remove();
     state.items = [];
     state.selected = null;
-    // 履歴の中身を直接いじらないよう、入れ子のデータはコピーして使う
-    for (const s of snap) {
-      createItem({
-        ...s,
-        crop: s.crop && { ...s.crop },
-        bg: s.bg && { ...s.bg },
-        outline: s.outline && { ...s.outline },
-      });
-    }
+    // 履歴の中身を直接いじらないよう、コピーして使う
+    for (const snap of snaps) createItem(snapshotOf(snap));
     select(state.items.find((it) => it.id === prevId) || null);
   }
 
@@ -216,6 +412,12 @@
       img.onload = () => resolve(img);
       img.onerror = reject;
       img.src = url;
+    });
+  }
+
+  function canvasToBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
     });
   }
 
@@ -261,6 +463,7 @@
         id: state.nextUploadId++,
         name: file.name,
         canvas,
+        blob: await canvasToBlob(canvas), // 自動保存用
         alpha: hasAlpha(canvas),
         corner: cornerColor(canvas),
         thumb: makeThumb(canvas),
@@ -304,6 +507,7 @@
       x.addEventListener('click', () => {
         state.uploads = state.uploads.filter((u) => u !== up);
         renderTray();
+        scheduleSave();
       });
 
       wrap.append(btn, x);
@@ -313,6 +517,9 @@
 
   /* ---------- 画像デザインの加工（トリミング・背景透明化・色変更） ---------- */
 
+  const luma = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+
+  // 色の処理の順番: 背景を透明に → 特定の色の置き換え → 色味 → 一色に塗る
   function processItem(item) {
     const src = item.upload.canvas;
     const c = item.canvas;
@@ -325,28 +532,54 @@
     c.height = ch;
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(src, sx, sy, cw, ch, 0, 0, cw, ch);
-    if (!item.bg && !item.tint) return;
+
+    const adj = item.adj;
+    const adjOn = adj.h !== 0 || adj.s !== 0 || adj.l !== 0;
+    if (!item.bg && !item.tint && !item.swap && !adjOn) return;
 
     const img = ctx.getImageData(0, 0, c.width, c.height);
     const d = img.data;
     const thr = item.tol * 3; // 色距離(0〜441)のしきい値
     const inner = thr * 0.6;  // これ以下は完全に透明、thrまでは境界をなだらかに
     const tint = item.tint ? hexToRgb(item.tint) : null;
+    const sw = item.swap;
+    const swTo = sw ? hexToRgb(sw.to) : null;
+    const swThr = sw ? Math.max(1, sw.tol * 3) : 0;
+    const swLum = sw ? Math.max(8, luma(sw.from.r, sw.from.g, sw.from.b)) : 0;
 
     for (let i = 0; i < d.length; i += 4) {
       let a = d[i + 3];
       if (a === 0) continue;
+      let r = d[i], g = d[i + 1], b = d[i + 2];
       if (item.bg) {
-        const dist = Math.hypot(d[i] - item.bg.r, d[i + 1] - item.bg.g, d[i + 2] - item.bg.b);
+        const dist = Math.hypot(r - item.bg.r, g - item.bg.g, b - item.bg.b);
         if (dist <= inner) a = 0;
         else if (dist < thr) a = a * (dist - inner) / (thr - inner);
         d[i + 3] = a;
+        if (a === 0) continue;
       }
-      if (tint && a > 0) {
-        d[i] = tint[0];
-        d[i + 1] = tint[1];
-        d[i + 2] = tint[2];
+      if (sw) {
+        const dist = Math.hypot(r - sw.from.r, g - sw.from.g, b - sw.from.b);
+        if (dist < swThr) {
+          // 近い色ほど強く置き換える。元の濃淡（かげ）は残す
+          const wgt = dist <= swThr * 0.5 ? 1 : 1 - (dist - swThr * 0.5) / (swThr * 0.5);
+          const kk = clamp(luma(r, g, b) / swLum, 0.35, 1.8);
+          r += (clamp(swTo[0] * kk, 0, 255) - r) * wgt;
+          g += (clamp(swTo[1] * kk, 0, 255) - g) * wgt;
+          b += (clamp(swTo[2] * kk, 0, 255) - b) * wgt;
+        }
       }
+      if (adjOn) {
+        let [h, sat, l] = rgbToHsl(r, g, b);
+        h = (h + adj.h + 360) % 360;
+        sat = clamp(sat * (1 + adj.s / 100), 0, 1);
+        l = adj.l >= 0 ? l + (1 - l) * (adj.l / 100) : l * (1 + adj.l / 100);
+        [r, g, b] = hslToRgb(h, sat, l);
+      }
+      if (tint) { r = tint[0]; g = tint[1]; b = tint[2]; }
+      d[i] = r;
+      d[i + 1] = g;
+      d[i + 2] = b;
     }
     ctx.putImageData(img, 0, 0);
   }
@@ -384,24 +617,99 @@
       });
   }
 
-  // 基準サイズ(TEXT_REF)でのレイアウト。大きさ nw×nh と、描く関数を返す
+  // 基準サイズ(TEXT_REF)でのレイアウト。大きさ nw×nh と、描く関数 draw(ctx, k) を返す。
+  // k は「基準サイズ1あたりの実際のピクセル数」（影のぼかし・ずらしはこの倍率で決める）
   function layoutText(item) {
     const F = TEXT_REF;
     const lines = (item.text || '').split('\n');
     const ot = item.outline.on ? (item.outline.width / 100) * F : 0; // 縁取りの見える太さ
-    const pad = ot + F * 0.08;
+    const sh = item.shadow.on ? item.shadow : null;
+    const shDist = sh ? (sh.dist / 100) * F : 0;
+    const shBlur = sh ? (sh.blur / 100) * F : 0;
+    const pad = ot + F * 0.08 + (sh ? shDist + shBlur * 1.5 : 0);
     measureCtx.font = fontSpec(item, F);
 
-    const paint = (c, str, x, y) => {
+    // 縁取りがあれば縁取りに、なければ文字に影をつけて重ねる
+    const paint = (c, str, x, y, k) => {
+      const withShadow = () => {
+        if (!sh) return;
+        c.shadowColor = sh.color;
+        c.shadowBlur = shBlur * k;
+        c.shadowOffsetX = shDist * k * 0.7071;
+        c.shadowOffsetY = shDist * k * 0.7071;
+      };
+      const noShadow = () => {
+        c.shadowColor = 'rgba(0, 0, 0, 0)';
+        c.shadowBlur = 0;
+        c.shadowOffsetX = 0;
+        c.shadowOffsetY = 0;
+      };
       if (ot > 0) {
         c.lineJoin = 'round';
         c.lineWidth = ot * 2;
         c.strokeStyle = item.outline.color;
+        withShadow();
         c.strokeText(str, x, y);
+        noShadow();
+        c.fillStyle = item.color;
+        c.fillText(str, x, y);
+      } else {
+        c.fillStyle = item.color;
+        withShadow();
+        c.fillText(str, x, y);
+        noShadow();
       }
-      c.fillStyle = item.color;
-      c.fillText(str, x, y);
     };
+
+    // アーチ（文字を円の上・下に沿って並べる）
+    if (!item.vertical && Math.abs(item.arch) >= 2) {
+      const lh = F * 1.3;
+      const up = item.arch > 0; // 正: 虹のように上にふくらむ / 負: 笑った口のように下にふくらむ
+      const widths = lines.map((l) => measureCtx.measureText(l).width);
+      const maxW = Math.max(F * 0.5, ...widths);
+      const R0 = maxW / toRad(Math.abs(item.arch));
+      const glyphs = [];
+      lines.forEach((line, i) => {
+        const R = up ? Math.max(R0 - i * lh, lh * 0.4) : R0 + i * lh;
+        const chars = Array.from(line);
+        const ws = chars.map((ch) => measureCtx.measureText(ch).width);
+        let at = -ws.reduce((x, y) => x + y, 0) / 2;
+        chars.forEach((ch, j) => {
+          const phi = (at + ws[j] / 2) / R;
+          at += ws[j];
+          glyphs.push({
+            ch, w: ws[j],
+            x: R * Math.sin(phi), y: up ? -R * Math.cos(phi) : R * Math.cos(phi), rot: up ? phi : -phi,
+          });
+        });
+      });
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const g of glyphs) {
+        const cs = Math.cos(g.rot), sn = Math.sin(g.rot);
+        for (const [px, py] of [[-g.w / 2, -F * 0.65], [g.w / 2, -F * 0.65], [-g.w / 2, F * 0.65], [g.w / 2, F * 0.65]]) {
+          const X = g.x + px * cs - py * sn, Y = g.y + px * sn + py * cs;
+          minX = Math.min(minX, X); maxX = Math.max(maxX, X);
+          minY = Math.min(minY, Y); maxY = Math.max(maxY, Y);
+        }
+      }
+      if (!glyphs.length) { minX = minY = 0; maxX = maxY = F; }
+      return {
+        nw: maxX - minX + pad * 2,
+        nh: maxY - minY + pad * 2,
+        draw(c, k) {
+          c.font = fontSpec(item, F);
+          c.textBaseline = 'middle';
+          c.textAlign = 'center';
+          for (const g of glyphs) {
+            c.save();
+            c.translate(pad - minX + g.x, pad - minY + g.y);
+            c.rotate(g.rot);
+            paint(c, g.ch, 0, 0, k);
+            c.restore();
+          }
+        },
+      };
+    }
 
     if (!item.vertical) {
       const lh = F * 1.3;
@@ -410,14 +718,14 @@
       return {
         nw: maxW + pad * 2,
         nh: lines.length * lh + pad * 2,
-        draw(c) {
+        draw(c, k) {
           c.font = fontSpec(item, F);
           c.textBaseline = 'middle';
           c.textAlign = 'left';
           lines.forEach((line, i) => {
             const free = maxW - widths[i];
             const dx = item.align === 'left' ? 0 : item.align === 'right' ? free : free / 2;
-            paint(c, line, pad + dx, pad + (i + 0.5) * lh);
+            paint(c, line, pad + dx, pad + (i + 0.5) * lh, k);
           });
         },
       };
@@ -431,7 +739,7 @@
     return {
       nw: cols.length * colW + pad * 2,
       nh: maxN * cell + pad * 2,
-      draw(c) {
+      draw(c, k) {
         c.font = fontSpec(item, F);
         c.textBaseline = 'middle';
         c.textAlign = 'center';
@@ -446,7 +754,7 @@
             if (V_ROTATE.has(ch)) c.rotate(Math.PI / 2);
             else if (V_PUNCT.has(ch)) c.translate(F * 0.55, -F * 0.55);
             else if (V_SMALL.has(ch)) c.translate(F * 0.1, -F * 0.1);
-            paint(c, ch, 0, 0);
+            paint(c, ch, 0, 0, k);
             c.restore();
           });
         });
@@ -468,13 +776,14 @@
     c.height = Math.max(1, Math.ceil(hStage * ppS));
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.scale(c.width / lay.nw, c.height / lay.nh);
-    lay.draw(ctx);
+    lay.draw(ctx, c.width / lay.nw);
   }
 
-  /* ---------- 手書きの線の描画 ---------- */
+  /* ---------- 手書きの線・スタンプの描画 ---------- */
 
-  // paths: 点の列の配列。map で点を画面上の座標に変換して描く
-  function drawPaths(ctx, paths, map, lwPx, color, smooth) {
+  // paths: 点の列の配列。map で点を画面上の座標に変換して描く。
+  // fill: 塗りの色（塗らないなら null）。lwPx が 0 なら線は描かない
+  function drawPaths(ctx, paths, map, lwPx, color, smooth, fill) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.lineWidth = lwPx;
@@ -483,9 +792,11 @@
     for (const path of paths) {
       const pts = path.map(map);
       if (pts.length === 1) {
-        ctx.beginPath();
-        ctx.arc(pts[0][0], pts[0][1], lwPx / 2, 0, Math.PI * 2);
-        ctx.fill();
+        if (lwPx > 0) {
+          ctx.beginPath();
+          ctx.arc(pts[0][0], pts[0][1], lwPx / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
         continue;
       }
       ctx.beginPath();
@@ -498,7 +809,11 @@
       } else {
         for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
       }
-      ctx.stroke();
+      if (fill && pts.length > 2) {
+        ctx.fillStyle = fill;
+        ctx.fill();
+      }
+      if (lwPx > 0) ctx.stroke();
     }
   }
 
@@ -517,26 +832,52 @@
       ctx,
       item.paths,
       ([x, y]) => [(half + x * item.cw) * ppS, (half + y * item.cw) * ppS],
-      item.lw * ppS,
+      item.lineOn ? item.lw * ppS : 0,
       item.color,
       item.shape === 'pen',
+      item.fill.on ? item.fill.color : null,
     );
+  }
+
+  function drawStamp(ctx, id, size, color) {
+    const def = STAMP_MAP[id];
+    ctx.save();
+    ctx.scale(size / 100, size / 100);
+    ctx.fillStyle = color;
+    ctx.fill(def.path, def.rule || 'nonzero');
+    ctx.restore();
+  }
+
+  function renderStamp(item) {
+    const c = item.canvas;
+    const px = Math.max(1, Math.ceil(item.w * Math.min(RENDER_W, MAX_PX / item.w)));
+    c.width = c.height = px;
+    drawStamp(c.getContext('2d', { willReadFrequently: true }), item.shape, px, item.color);
   }
 
   /* ---------- デザイン（画像・文字・線）の共通処理 ---------- */
 
   const KIND_DEFAULTS = {
-    image: () => ({ tint: null, bg: null, tol: DEFAULT_TOL, crop: { l: 0, t: 0, r: 0, b: 0 } }),
+    image: () => ({
+      tint: null, bg: null, tol: DEFAULT_TOL, crop: { l: 0, t: 0, r: 0, b: 0 },
+      adj: { h: 0, s: 0, l: 0 }, swap: null,
+    }),
     text: () => ({
       text: 'テキスト', font: 'Noto Sans JP', color: '#111111', bold: false, vertical: false,
-      align: 'center', outline: { on: false, color: '#ffffff', width: 8 }, nw: 0,
+      align: 'center', outline: { on: false, color: '#ffffff', width: 8 },
+      shadow: { on: false, color: '#000000', blur: 6, dist: 6 }, arch: 0, nw: 0,
     }),
-    stroke: () => ({ shape: 'pen', paths: [], cw: 0.1, ar: 1, lw: 0.009, color: '#111111' }),
+    stroke: () => ({
+      shape: 'pen', paths: [], cw: 0.1, ar: 1, lw: 0.009, color: '#111111',
+      fill: { on: false, color: '#111111' }, lineOn: true,
+    }),
+    stamp: () => ({ shape: 'heart', color: '#e53935' }),
   };
 
   function renderItem(item) {
     if (item.kind === 'image') processItem(item);
     else if (item.kind === 'text') renderText(item);
+    else if (item.kind === 'stamp') renderStamp(item);
     else renderStroke(item);
   }
 
@@ -614,6 +955,23 @@
     input.select();
   }
 
+  function addStamp(shape) {
+    const p = spawnPoint();
+    const item = createItem({ kind: 'stamp', shape, color: state.stampColor, w: 0.12, x: p.x, y: p.y });
+    select(item);
+    commit();
+    say(`${p.face === 'front' ? '正面' : '背面'}にスタンプを追加しました。`);
+  }
+
+  // 絵文字は、1文字だけのテキストとして追加する（あとから大きさや影も変えられる）
+  function addEmoji(ch) {
+    const p = spawnPoint();
+    const item = createItem({ kind: 'text', text: ch, w: 0.12, x: p.x, y: p.y });
+    select(item);
+    commit();
+    say(`${p.face === 'front' ? '正面' : '背面'}に絵文字を追加しました。`);
+  }
+
   function removeItem(item) {
     item.el.remove();
     state.items = state.items.filter((it) => it !== item);
@@ -638,6 +996,25 @@
     return { x: dx * Math.cos(r) + dy * Math.sin(r), y: -dx * Math.sin(r) + dy * Math.cos(r) };
   }
 
+  // デザインの上の点 (X, Y)（ステージ幅を1とした座標）の近く（tol 以内）に、色のついた部分があるか
+  function itemHit(it, X, Y, tol) {
+    const L = toLocal(it, X, Y);
+    const hb = it.w * aspectOf(it);
+    if (Math.abs(L.x) > it.w / 2 + tol || Math.abs(L.y) > hb / 2 + tol) return false;
+    const c = it.canvas;
+    const ppx = c.width / it.w;
+    const u = Math.round((L.x + it.w / 2) * ppx);
+    const v = Math.round((L.y + hb / 2) * (c.height / hb));
+    const r = Math.ceil(tol * ppx);
+    const x0 = clamp(u - r, 0, c.width - 1);
+    const y0 = clamp(v - r, 0, c.height - 1);
+    const x1 = clamp(u + r, 0, c.width - 1);
+    const y1 = clamp(v + r, 0, c.height - 1);
+    const data = c.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, x1 - x0 + 1, y1 - y0 + 1).data;
+    for (let k = 3; k < data.length; k += 4) if (data[k] > 30) return true;
+    return false;
+  }
+
   // タップした場所にある一番手前のデザインを返す（透明な所は素通り。細い線・文字は少し広めに判定）
   function hitTest(clientX, clientY) {
     const rect = stage.getBoundingClientRect();
@@ -646,21 +1023,7 @@
     const Y = (clientY - rect.top) / s;
     for (let i = state.items.length - 1; i >= 0; i--) {
       const it = state.items[i];
-      const L = toLocal(it, X, Y);
-      const hb = it.w * aspectOf(it);
-      const tol = (it.kind === 'image' ? 2 : HIT_PX) / s;
-      if (Math.abs(L.x) > it.w / 2 + tol || Math.abs(L.y) > hb / 2 + tol) continue;
-      const c = it.canvas;
-      const ppx = c.width / it.w;
-      const u = Math.round((L.x + it.w / 2) * ppx);
-      const v = Math.round((L.y + hb / 2) * (c.height / hb));
-      const r = Math.ceil(tol * ppx);
-      const x0 = clamp(u - r, 0, c.width - 1);
-      const y0 = clamp(v - r, 0, c.height - 1);
-      const x1 = clamp(u + r, 0, c.width - 1);
-      const y1 = clamp(v + r, 0, c.height - 1);
-      const data = c.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, x1 - x0 + 1, y1 - y0 + 1).data;
-      for (let k = 3; k < data.length; k += 4) if (data[k] > 30) return it;
+      if (itemHit(it, X, Y, (it.kind === 'image' || it.kind === 'stamp' ? 2 : HIT_PX) / s)) return it;
     }
     return null;
   }
@@ -846,6 +1209,7 @@
     syncSliders();
     if (item.kind === 'image') syncImagePanel(item);
     else if (item.kind === 'text') syncTextPanel(item);
+    else if (item.kind === 'stamp') syncStampPanel(item);
     else syncStrokePanel(item);
   }
 
@@ -918,38 +1282,86 @@
 
   const tolInput = $('#tol');
   const bgChip = $('#bgChip');
+  const adjInputs = { h: $('#adjH'), s: $('#adjS'), l: $('#adjL') };
+  const adjOut = { h: $('#adjHOut'), s: $('#adjSOut'), l: $('#adjLOut') };
+  const swapPreview = $('#swapPreview');
+  const swapChip = $('#swapChip');
+  const swapTol = $('#swapTol');
   const tintPicker = makeColorPicker($('#tintPicker'), (hex) => setTint(hex));
+  const swapPicker = makeColorPicker($('#swapPicker'), (hex) => {
+    const item = state.selected;
+    if (!item || item.kind !== 'image') return;
+    if (!item.swap) {
+      say('先に上の画像をタップして、置き換えたい色を選んでください。');
+      return;
+    }
+    item.swap.to = hex;
+    scheduleProcess(item);
+    swapPicker.set(hex);
+  });
 
-  function drawBgPreview(item) {
+  const colorChip = (label, c) => {
+    const el = document.createDocumentFragment();
+    el.append(label);
+    if (c) {
+      const sw = document.createElement('i');
+      sw.style.background = `rgb(${c.r}, ${c.g}, ${c.b})`;
+      el.append(sw);
+    } else {
+      el.append('なし');
+    }
+    return el;
+  };
+
+  function drawPreview(canvas, item) {
     const src = item.upload.canvas;
     const k = Math.min(1, 240 / src.width, 160 / src.height);
-    bgPreview.width = Math.max(1, Math.round(src.width * k));
-    bgPreview.height = Math.max(1, Math.round(src.height * k));
-    bgPreview.getContext('2d').drawImage(src, 0, 0, bgPreview.width, bgPreview.height);
+    canvas.width = Math.max(1, Math.round(src.width * k));
+    canvas.height = Math.max(1, Math.round(src.height * k));
+    canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
   }
 
   function syncImagePanel(item) {
     tolInput.value = String(item.tol);
     tintPicker.set(item.tint);
-    bgChip.replaceChildren();
-    if (item.bg) {
-      const sw = document.createElement('i');
-      sw.style.background = `rgb(${item.bg.r}, ${item.bg.g}, ${item.bg.b})`;
-      bgChip.append('透明にする色: ', sw);
-    } else {
-      bgChip.textContent = '透明にする色: なし';
+    bgChip.replaceChildren(colorChip('透明にする色: ', item.bg));
+    for (const key of ['h', 's', 'l']) {
+      adjInputs[key].value = String(item.adj[key]);
+      adjOut[key].textContent = String(item.adj[key]);
     }
-    drawBgPreview(item);
+    swapChip.replaceChildren(colorChip('置き換える色: ', item.swap && item.swap.from));
+    swapTol.value = String(item.swap ? item.swap.tol : DEFAULT_TOL);
+    swapPicker.set(item.swap ? item.swap.to : null);
+    drawPreview(bgPreview, item);
+    drawPreview(swapPreview, item);
     drawCrop(item);
+  }
+
+  // プレビュー画像をタップした場所の色を取り出す（もともと透明な所は null）
+  function pickColor(canvas, e, item) {
+    const r = canvas.getBoundingClientRect();
+    const src = item.upload.canvas;
+    const x = clamp(Math.floor(((e.clientX - r.left) / r.width) * src.width), 0, src.width - 1);
+    const y = clamp(Math.floor(((e.clientY - r.top) / r.height) * src.height), 0, src.height - 1);
+    const [pr, pg, pb, pa] = src.getContext('2d').getImageData(x, y, 1, 1).data;
+    if (pa < 10) {
+      say('そこはもともと透明です。色のついた部分をタップしてください。');
+      return null;
+    }
+    return { r: pr, g: pg, b: pb };
   }
 
   function setTint(hex) {
     const item = state.selected;
     if (!item || item.kind !== 'image') return;
     // 背景つきの画像(JPGなど)は、背景ごと塗りつぶされないよう先に背景を透明にする
-    if (!item.tint && !item.bg && !item.upload.alpha && item.upload.corner) {
-      item.bg = item.upload.corner;
-      say('背景が一色だったので、先に背景を透明にしました（下の「解除」で戻せます）。');
+    if (!item.tint && !item.bg && !item.upload.alpha) {
+      if (item.upload.corner) {
+        item.bg = item.upload.corner;
+        say('背景が一色だったので、先に背景を透明にしました（「背景を透明にする」の「解除」で戻せます）。');
+      } else {
+        say('背景が透明でない画像は、四角ごと塗られます。先に「背景を透明にする」で背景の色を選んでください。');
+      }
     }
     item.tint = hex;
     processItem(item);
@@ -960,6 +1372,46 @@
     const item = state.selected;
     if (!item) return;
     item.tint = null;
+    processItem(item);
+    syncImagePanel(item);
+  });
+
+  for (const key of ['h', 's', 'l']) {
+    adjInputs[key].addEventListener('input', () => {
+      const item = state.selected;
+      if (!item) return;
+      item.adj[key] = Number(adjInputs[key].value);
+      adjOut[key].textContent = adjInputs[key].value;
+      scheduleProcess(item);
+    });
+  }
+  $('#adjReset').addEventListener('click', () => {
+    const item = state.selected;
+    if (!item) return;
+    item.adj = { h: 0, s: 0, l: 0 };
+    processItem(item);
+    syncImagePanel(item);
+  });
+
+  swapPreview.addEventListener('click', (e) => {
+    const item = state.selected;
+    if (!item) return;
+    const c = pickColor(swapPreview, e, item);
+    if (!c) return;
+    item.swap = { from: c, to: item.swap ? item.swap.to : '#e53935', tol: item.swap ? item.swap.tol : DEFAULT_TOL };
+    processItem(item);
+    syncImagePanel(item);
+  });
+  swapTol.addEventListener('input', () => {
+    const item = state.selected;
+    if (!item || !item.swap) return;
+    item.swap.tol = Number(swapTol.value);
+    scheduleProcess(item);
+  });
+  $('#swapClear').addEventListener('click', () => {
+    const item = state.selected;
+    if (!item) return;
+    item.swap = null;
     processItem(item);
     syncImagePanel(item);
   });
@@ -981,7 +1433,7 @@
     const item = state.selected;
     if (!item) return;
     if (!item.upload.corner) {
-      say('四隅の色がそろっていないため自動で決められません。画像をクリックして色を選んでください。');
+      say('四隅の色がそろっていないため自動で決められません。画像をタップして色を選んでください。');
       return;
     }
     item.bg = item.upload.corner;
@@ -991,16 +1443,9 @@
   bgPreview.addEventListener('click', (e) => {
     const item = state.selected;
     if (!item) return;
-    const r = bgPreview.getBoundingClientRect();
-    const src = item.upload.canvas;
-    const x = clamp(Math.floor(((e.clientX - r.left) / r.width) * src.width), 0, src.width - 1);
-    const y = clamp(Math.floor(((e.clientY - r.top) / r.height) * src.height), 0, src.height - 1);
-    const [pr, pg, pb, pa] = src.getContext('2d').getImageData(x, y, 1, 1).data;
-    if (pa < 10) {
-      say('そこはもともと透明です。色のついた部分をクリックしてください。');
-      return;
-    }
-    item.bg = { r: pr, g: pg, b: pb };
+    const c = pickColor(bgPreview, e, item);
+    if (!c) return;
+    item.bg = c;
     processItem(item);
     syncImagePanel(item);
   });
@@ -1096,10 +1541,18 @@
   const tOutline = $('#tOutline');
   const outlineOpts = $('#outlineOpts');
   const outlineW = $('#outlineW');
+  const archInput = $('#arch');
+  const archOut = $('#archOut');
+  const archRow = $('#archRow');
+  const tShadow = $('#tShadow');
+  const shadowOpts = $('#shadowOpts');
+  const shadowBlur = $('#shadowBlur');
+  const shadowDist = $('#shadowDist');
   const alignBtns = [...document.querySelectorAll('#alignSeg button')];
 
   const textColor = makeColorPicker($('#textColor'), (hex) => editText((it) => { it.color = hex; }));
   const outlineColor = makeColorPicker($('#outlineColor'), (hex) => editText((it) => { it.outline.color = hex; }));
+  const shadowColor = makeColorPicker($('#shadowColor'), (hex) => editText((it) => { it.shadow.color = hex; }));
 
   for (const [family, label] of FONTS) {
     const b = document.createElement('button');
@@ -1130,11 +1583,19 @@
     for (const b of fontList.children) b.classList.toggle('on', b.dataset.font === item.font);
     textColor.set(item.color);
     outlineColor.set(item.outline.color);
+    shadowColor.set(item.shadow.color);
     tBold.setAttribute('aria-pressed', String(item.bold));
     tVert.setAttribute('aria-pressed', String(item.vertical));
     tOutline.setAttribute('aria-pressed', String(item.outline.on));
+    tShadow.setAttribute('aria-pressed', String(item.shadow.on));
     outlineOpts.hidden = !item.outline.on;
+    shadowOpts.hidden = !item.shadow.on;
     outlineW.value = String(item.outline.width);
+    shadowBlur.value = String(item.shadow.blur);
+    shadowDist.value = String(item.shadow.dist);
+    archRow.hidden = item.vertical; // アーチは横書きだけ
+    archInput.value = String(item.arch);
+    archOut.textContent = item.arch === 0 ? 'なし' : item.arch > 0 ? `上にカーブ ${item.arch}°` : `下にカーブ ${-item.arch}°`;
     const names = item.vertical ? { left: '上', center: '中央', right: '下' } : { left: '左', center: '中央', right: '右' };
     for (const b of alignBtns) {
       b.textContent = names[b.dataset.align];
@@ -1146,12 +1607,25 @@
   tBold.addEventListener('click', () => editText((it) => { it.bold = !it.bold; }));
   tVert.addEventListener('click', () => editText((it) => { it.vertical = !it.vertical; }));
   tOutline.addEventListener('click', () => editText((it) => { it.outline.on = !it.outline.on; }));
+  tShadow.addEventListener('click', () => editText((it) => { it.shadow.on = !it.shadow.on; }));
   outlineW.addEventListener('input', () => editText((it) => { it.outline.width = Number(outlineW.value); }));
+  shadowBlur.addEventListener('input', () => editText((it) => { it.shadow.blur = Number(shadowBlur.value); }));
+  shadowDist.addEventListener('input', () => editText((it) => { it.shadow.dist = Number(shadowDist.value); }));
+  archInput.addEventListener('input', () => editText((it) => {
+    const v = Number(archInput.value);
+    it.arch = Math.abs(v) < 4 ? 0 : v; // 0 付近はまっすぐに吸着
+  }));
+  $('#archReset').addEventListener('click', () => editText((it) => { it.arch = 0; }));
   for (const b of alignBtns) b.addEventListener('click', () => editText((it) => { it.align = b.dataset.align; }));
 
   /* ---------- 設定パネル（手書きの線） ---------- */
 
   const strokeColor = makeColorPicker($('#strokeColor'), (hex) => editStroke((it) => { it.color = hex; }));
+  const fillColor = makeColorPicker($('#fillColor'), (hex) => editStroke((it) => { it.fill.color = hex; }));
+  const tFill = $('#tFill');
+  const tLine = $('#tLine');
+  const fillGroup = $('#fillGroup');
+  const fillOpts = $('#fillOpts');
 
   function editStroke(change) {
     const item = state.selected;
@@ -1164,7 +1638,13 @@
 
   function syncStrokePanel(item) {
     strokeColor.set(item.color);
+    fillColor.set(item.fill.color);
     lwInput.value = String(Math.round(item.lw / LW_UNIT));
+    const closed = item.shape === 'rect' || item.shape === 'ellipse'; // 塗れるのは四角と丸だけ
+    fillGroup.hidden = !closed;
+    fillOpts.hidden = !item.fill.on;
+    tFill.setAttribute('aria-pressed', String(item.fill.on));
+    tLine.setAttribute('aria-pressed', String(item.lineOn));
   }
 
   lwInput.addEventListener('input', () => editStroke((it) => {
@@ -1173,6 +1653,23 @@
     it.w = it.cw + lw;
     it.lw = lw;
   }));
+  tFill.addEventListener('click', () => editStroke((it) => { it.fill.on = !it.fill.on; }));
+  tLine.addEventListener('click', () => editStroke((it) => { it.lineOn = !it.lineOn; }));
+
+  /* ---------- 設定パネル（スタンプ） ---------- */
+
+  const stampColor = makeColorPicker($('#stampColor'), (hex) => {
+    const item = state.selected;
+    if (!item || item.kind !== 'stamp') return;
+    item.color = hex;
+    state.stampColor = hex; // 次に追加するスタンプも同じ色で出す
+    refresh(item);
+    syncStampPanel(item);
+  });
+
+  function syncStampPanel(item) {
+    stampColor.set(item.color);
+  }
 
   /* ---------- 手書きツール ---------- */
 
@@ -1190,6 +1687,7 @@
     for (const b of toolBtns) b.setAttribute('aria-pressed', String(b.dataset.tool === tool));
     $('#drawColor').hidden = tool === 'eraser' || tool === 'select';
     $('#drawWRow').hidden = tool === 'select';
+    $('#drawFill').hidden = tool !== 'rect' && tool !== 'ellipse';
     $('#drawWLabel').textContent = tool === 'eraser' ? '消しゴムの大きさ' : '線の太さ';
     drawW.value = String(tool === 'eraser' ? state.eraserSize : state.pen.width);
     updateMode();
@@ -1200,6 +1698,10 @@
     else state.pen.width = Number(drawW.value);
   });
   for (const b of toolBtns) b.addEventListener('click', () => setTool(b.dataset.tool));
+  $('#drawFill').addEventListener('click', (e) => {
+    state.pen.fill = !state.pen.fill;
+    e.currentTarget.setAttribute('aria-pressed', String(state.pen.fill));
+  });
 
   // 手書き中は、デザインを選ぶハンドルなどを隠して、ステージ全体で描けるようにする
   function updateMode() {
@@ -1222,10 +1724,10 @@
   }
 
   // 描いている途中のプレビュー（ステージ幅を1とした座標で受け取る）
-  function drawLive(paths, color, lw, smooth, ring) {
+  function drawLive(paths, color, lw, smooth, ring, fill) {
     clearLive();
     const k = live.width; // ステージ幅 = live.width px
-    drawPaths(liveCtx, paths, ([x, y]) => [x * k, y * k], lw * k, color, smooth);
+    drawPaths(liveCtx, paths, ([x, y]) => [x * k, y * k], lw * k, color, smooth, fill);
     if (ring) {
       liveCtx.beginPath();
       liveCtx.arc(ring.x * k, ring.y * k, ring.r * k, 0, Math.PI * 2);
@@ -1268,7 +1770,7 @@
   }
 
   // ステージ上の線（ステージ幅を1とした座標）から、線のデザインを作る
-  function strokeProps(paths, shape, color, lw) {
+  function strokeProps(paths, shape, color, lw, filled) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const path of paths) {
       for (const [x, y] of path) {
@@ -1281,7 +1783,7 @@
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     const left = cx - bw / 2, top = cy - bh / 2;
     return {
-      kind: 'stroke', shape, color, lw,
+      kind: 'stroke', shape, color, lw, fill: { on: filled, color }, lineOn: true,
       paths: paths.map((p) => p.map(([x, y]) => [(x - left) / bw, (y - top) / bw])),
       cw: bw, ar: bh / bw, x: cx, y: cy, w: bw + lw,
     };
@@ -1321,6 +1823,11 @@
   function eraseDisc(p, R) {
     for (const item of [...state.items]) {
       if (item.kind !== 'stroke') continue;
+      if (item.fill.on) {
+        // 塗りつぶした図形は部分的には消せないので、触れたら丸ごと消す
+        if (itemHit(item, p[0], p[1], R)) removeItem(item);
+        continue;
+      }
       const L = toLocal(item, p[0], p[1]);
       const hb = item.w * aspectOf(item);
       const q = [(L.x + item.w / 2 - item.lw / 2) / item.cw, (L.y + hb / 2 - item.lw / 2) / item.cw];
@@ -1371,10 +1878,12 @@
 
     const lw = state.pen.width * LW_UNIT;
     const color = state.pen.color;
+    const filled = state.pen.fill && (tool === 'rect' || tool === 'ellipse');
+    const fillStyle = filled ? color : null;
     const pts = [p0];
     let cur = p0;
     const currentPaths = (ev) => (tool === 'pen' ? [pts] : shapePaths(tool, p0, cur, ev.shiftKey, ev.altKey));
-    drawLive(currentPaths(e), color, lw, tool === 'pen');
+    drawLive(currentPaths(e), color, lw, tool === 'pen', null, fillStyle);
     track(stage, e, (ev) => {
       if (tool === 'pen') {
         for (const ce of ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev]) {
@@ -1385,13 +1894,13 @@
       } else {
         cur = at(ev);
       }
-      drawLive(currentPaths(ev), color, lw, tool === 'pen');
+      drawLive(currentPaths(ev), color, lw, tool === 'pen', null, fillStyle);
     }, (ev) => {
       const paths = currentPaths(ev);
       clearLive();
       const moved = Math.hypot(cur[0] - p0[0], cur[1] - p0[1]);
       if (tool !== 'pen' && moved < 0.004) return; // 図形は、ほとんど動かしていなければ描かない
-      createItem(strokeProps(paths, tool, color, lw));
+      createItem(strokeProps(paths, tool, color, lw, filled));
       commit();
     });
   }
@@ -1410,6 +1919,42 @@
   for (const t of tabBtns) t.addEventListener('click', () => setTab(t.dataset.tab));
   $('#addText').addEventListener('click', addText);
 
+  // スタンプ（図形・絵文字）のタブ
+  const stampTray = $('#stampTray');
+  const stampKindBtns = [...document.querySelectorAll('#stampKind button')];
+
+  function renderStampTray(kind) {
+    for (const b of stampKindBtns) b.setAttribute('aria-pressed', String(b.dataset.kind === kind));
+    stampTray.replaceChildren();
+    if (kind === 'shape') {
+      for (const st of STAMPS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'thumb-btn stamp-btn';
+        b.title = st.label;
+        b.setAttribute('aria-label', `${st.label}のスタンプを追加`);
+        const c = document.createElement('canvas');
+        c.width = c.height = 96;
+        drawStamp(c.getContext('2d'), st.id, 96, '#1f2430');
+        b.append(c);
+        b.addEventListener('click', () => addStamp(st.id));
+        stampTray.append(b);
+      }
+    } else {
+      for (const ch of EMOJIS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'thumb-btn stamp-btn emoji-btn';
+        b.textContent = ch;
+        b.setAttribute('aria-label', `${ch} を追加`);
+        b.addEventListener('click', () => addEmoji(ch));
+        stampTray.append(b);
+      }
+    }
+    stampTray.scrollLeft = 0;
+  }
+  for (const b of stampKindBtns) b.addEventListener('click', () => renderStampTray(b.dataset.kind));
+
   /* ---------- 画像追加・保存 ---------- */
 
   $('#file').addEventListener('change', async (e) => {
@@ -1417,10 +1962,12 @@
     e.target.value = '';
     for (const f of files) await addUpload(f);
     renderTray();
+    scheduleSave();
     if (files.length) tray.scrollLeft = tray.scrollWidth;
   });
 
-  $('#savePng').addEventListener('click', () => {
+  // 完成イメージ（パーカーと、重ねたデザインすべて）を1枚の画像にする
+  function renderDesign() {
     const W = hoodie.naturalWidth;
     const H = hoodie.naturalHeight;
     const c = document.createElement('canvas');
@@ -1437,19 +1984,181 @@
       ctx.drawImage(it.canvas, -iw / 2, -ih / 2, iw, ih);
       ctx.restore();
     }
+    return c;
+  }
+
+  function download(blob) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'class-parka-design.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  // 「保存」も「共有」も、まず共有画面を開く。
+  // iPhone / iPad では共有画面の「画像を保存」で写真アプリに入る。開けない端末ではダウンロードにする
+  async function exportImage(mode) {
+    let blob;
     try {
-      c.toBlob((blob) => {
-        if (!blob) { say('画像を作れませんでした。'); return; }
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'class-parka-design.png';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      }, 'image/png');
+      blob = await canvasToBlob(renderDesign());
     } catch {
-      say('保存できませんでした。ファイルを直接開かず、GitHub Pagesなどのウェブ経由で開いてください。');
+      say('画像を作れませんでした。ファイルを直接開かず、GitHub Pagesなどのウェブ経由で開いてください。');
+      return;
     }
+    const file = new File([blob], 'class-parka-design.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (mode === 'save') say('共有画面で「画像を保存」を選ぶと、写真アプリに入ります。');
+      try {
+        await navigator.share({ files: [file], title: '1-Iクラスパーカデザイン' });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return; // 共有画面を閉じただけ
+      }
+    }
+    download(blob);
+    say('この端末では共有画面を開けないので、画像ファイルとして保存しました。');
+  }
+
+  $('#savePng').addEventListener('click', () => exportImage('save'));
+  $('#shareBtn').addEventListener('click', () => exportImage('share'));
+
+  /* ---------- 自動保存（この端末のブラウザの中だけに保存） ---------- */
+
+  const saveState = $('#saveState');
+  let dbPromise = null;
+  let saveTimer = 0;
+
+  function openDb() {
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error('indexedDB なし')); return; }
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => {
+          req.result.createObjectStore('work');
+          req.result.createObjectStore('uploads', { keyPath: 'id' });
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    return dbPromise;
+  }
+
+  const idb = (store, mode, fn) => openDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(store, mode);
+    const req = fn(tx.objectStore(store));
+    tx.oncomplete = () => resolve(req && req.result);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  }));
+
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveState.textContent = '保存中…';
+    saveTimer = setTimeout(saveNow, SAVE_DELAY);
+  }
+
+  async function saveNow() {
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    try {
+      const uploads = new Set(state.uploads);
+      for (const it of state.items) if (it.upload) uploads.add(it.upload);
+      for (const up of uploads) {
+        if (up.stored) continue;
+        await idb('uploads', 'readwrite', (st) => st.put({
+          id: up.id, name: up.name, blob: up.blob, alpha: up.alpha, corner: up.corner, thumb: up.thumb,
+        }));
+        up.stored = true;
+      }
+      const items = state.items.map((it) => {
+        const snap = snapshotOf(it);
+        if (snap.upload) snap.upload = snap.upload.id;
+        return snap;
+      });
+      await idb('work', 'readwrite', (st) => st.put({
+        v: 1,
+        items,
+        trayIds: state.uploads.map((u) => u.id),
+        nextUploadId: state.nextUploadId,
+        nextItemId: state.nextItemId,
+        side: side(),
+        savedAt: Date.now(),
+      }, 'work'));
+      saveState.textContent = '自動保存しました';
+    } catch {
+      saveState.textContent = '自動保存できません';
+    }
+  }
+
+  // 前回の作業があれば、画像・デザインを元に戻す。戻したら true
+  async function loadWork() {
+    let work;
+    try {
+      work = await idb('work', 'readonly', (st) => st.get('work'));
+    } catch {
+      saveState.textContent = '自動保存はこの環境では使えません';
+      return false;
+    }
+    if (!work || work.v !== 1) return false;
+
+    const wanted = new Set([...work.trayIds, ...work.items.map((it) => it.upload).filter(Boolean)]);
+    const uploads = new Map();
+    for (const id of wanted) {
+      try {
+        const rec = await idb('uploads', 'readonly', (st) => st.get(id));
+        if (!rec) continue;
+        const url = URL.createObjectURL(rec.blob);
+        try {
+          const img = await loadImage(url);
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d', { willReadFrequently: true }).drawImage(img, 0, 0);
+          uploads.set(id, {
+            id, name: rec.name, canvas, blob: rec.blob, alpha: rec.alpha, corner: rec.corner, thumb: rec.thumb, stored: true,
+          });
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      } catch { /* 読めなかった画像は飛ばす */ }
+    }
+    state.uploads = work.trayIds.map((id) => uploads.get(id)).filter(Boolean);
+    state.nextUploadId = work.nextUploadId;
+    state.nextItemId = work.nextItemId;
+    for (const it of work.items) {
+      if (it.kind === 'image') {
+        it.upload = uploads.get(it.upload);
+        if (!it.upload) continue;
+      }
+      createItem(it);
+    }
+    const radio = document.querySelector(`input[name="side"][value="${work.side}"]`);
+    if (radio) radio.checked = true;
+    // どこからも使われていない画像のデータは捨てる
+    idb('uploads', 'readonly', (st) => st.getAllKeys())
+      .then((keys) => Promise.all(keys.filter((k) => !uploads.has(k)).map((k) => idb('uploads', 'readwrite', (st) => st.delete(k)))))
+      .catch(() => {});
+    return state.items.length > 0 || state.uploads.length > 0;
+  }
+
+  $('#newWork').addEventListener('click', async () => {
+    if (!confirm('最初から始めますか？いまのデザインと、追加した画像がすべて消えます。')) return;
+    for (const it of [...state.items]) removeItem(it);
+    state.uploads = [];
+    renderTray();
+    history.stack = [];
+    history.index = -1;
+    try { await idb('uploads', 'readwrite', (st) => st.clear()); } catch { /* 保存できない環境なら何もしない */ }
+    commit();
+    say('新しく始めました。');
   });
+
+  // 画面を閉じる・アプリを切りかえるときに、待たずに保存する
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && saveTimer) saveNow();
+  });
+  window.addEventListener('pagehide', () => { if (saveTimer) saveNow(); });
 
   /* ---------- 初期化 ---------- */
 
@@ -1465,11 +2174,19 @@
     document.documentElement.style.setProperty('--bar-h', `${tabbar.offsetHeight}px`);
   }).observe(tabbar);
 
-  renderTray();
-  setTool('pen');
-  setTab('image');
-  drawColor.set(state.pen.color);
-  commit();
+  async function start() {
+    renderTray();
+    renderStampTray('shape');
+    setTool('pen');
+    setTab('image');
+    drawColor.set(state.pen.color);
+    const restored = await loadWork();
+    renderTray();
+    commit();
+    if (restored) say('前回の続きから開きました。');
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  }
+  start();
 
   // ホーム画面に追加したあと、オフラインでも開けるようにする
   if ('serviceWorker' in navigator) {

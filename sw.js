@@ -1,7 +1,7 @@
 // オフラインでも使えるように、サイトのファイルとフォントを端末に保存しておく。
 // サイトのファイルは、ネットにつながっているときは常に最新を取りにいき、つながらないときだけ保存分を使う。
 // フォント（Google Fonts）は、保存分があればそれを使い、裏で最新に更新する。
-const CACHE = 'parka-v3';
+const CACHE = 'parka-v4';
 const FONT_CACHE = 'parka-fonts-v1';
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 const FILES = [

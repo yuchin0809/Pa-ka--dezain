@@ -36,8 +36,10 @@
       <div class="spacer"></div>
       <button type="button" class="btn ghost js-undo" aria-label="元に戻す" title="元に戻す (Ctrl+Z)">↶</button>
       <button type="button" class="btn ghost js-redo" aria-label="やり直し" title="やり直し (Ctrl+Shift+Z)">↷</button>
+      <button type="button" id="newWork" class="btn ghost">新しく始める</button>
       <button type="button" id="clearAll" class="btn ghost">すべて消す</button>
-      <button type="button" id="savePng" class="btn primary">PNGで保存</button>
+      <button type="button" id="savePng" class="btn primary" title="共有画面を開き、「画像を保存」で写真アプリに保存できます">保存</button>
+      <button type="button" id="shareBtn" class="btn primary" title="LINEなどに完成画像を送れます">共有</button>
     </div>
 
     <div id="stage" class="stage">
@@ -51,7 +53,10 @@
         <div class="handle h-rot" id="hRot" role="presentation" title="ドラッグで拡大縮小・回転">⤡</div>
       </div>
     </div>
-    <p id="msg" class="msg" role="status"></p>
+    <div class="msg-row">
+      <p id="msg" class="msg" role="status"></p>
+      <span id="saveState" class="save-state" aria-live="polite"></span>
+    </div>
 
     <aside id="hint" class="hint">
       <h2>デザインの調整</h2>
@@ -59,6 +64,7 @@
       <p>右下の丸いハンドルをドラッグすると拡大縮小と回転、左上の×で削除できます。</p>
       <p>動かしている間、パーカーの中心や他のデザインに近づくと、ぴたっと揃います。</p>
       <p>下のタブの「手書き」で、ペンや指で直接描けます。描いた線は「選択」でタップすると動かせます。</p>
+      <p>作業は自動で保存されるので、閉じても次に開いたときに続きから作れます（この端末の中だけに保存されます）。</p>
     </aside>
 
     <section id="panel" class="panel" hidden aria-label="選択中のデザインの設定">
@@ -103,6 +109,28 @@
             <input type="range" id="outlineW" min="1" max="30" step="1">
           </div>
         </div>
+        <div class="field" id="archRow">
+          <label for="arch">アーチ（カーブ） <output id="archOut">なし</output></label>
+          <div class="rot-row">
+            <input type="range" id="arch" min="-180" max="180" step="1">
+            <button type="button" id="archReset" class="btn ghost">まっすぐ</button>
+          </div>
+        </div>
+        <div class="row">
+          <button type="button" id="tShadow" class="toggle" aria-pressed="false">影</button>
+        </div>
+        <div id="shadowOpts" hidden>
+          <h3>影の色</h3>
+          <div id="shadowColor"></div>
+          <div class="field">
+            <label for="shadowBlur">影のぼかし</label>
+            <input type="range" id="shadowBlur" min="0" max="30" step="1">
+          </div>
+          <div class="field">
+            <label for="shadowDist">影のはなれぐあい</label>
+            <input type="range" id="shadowDist" min="0" max="30" step="1">
+          </div>
+        </div>
       </div>
 
       <!-- 手書きの線 -->
@@ -114,15 +142,68 @@
           <label for="lw">線の太さ</label>
           <input type="range" id="lw" min="1" max="30" step="1">
         </div>
+        <div id="fillGroup" hidden>
+          <div class="row">
+            <button type="button" id="tFill" class="toggle" aria-pressed="false">塗りつぶし</button>
+            <button type="button" id="tLine" class="toggle" aria-pressed="true">線を描く</button>
+          </div>
+          <div id="fillOpts" hidden>
+            <h3>塗りの色</h3>
+            <div id="fillColor"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- スタンプ -->
+      <div class="group-box" data-kinds="stamp" hidden>
+        <h2>スタンプ</h2>
+        <h3>色</h3>
+        <div id="stampColor"></div>
       </div>
 
       <!-- 画像 -->
       <details class="group" data-kinds="image" hidden>
-        <summary>色を変える</summary>
+        <summary>一色にする（ロゴ・イラスト向け）</summary>
         <p class="note">画像の形（透明な部分と、透明にした背景以外）を一色で塗ります。</p>
         <div id="tintPicker"></div>
         <div class="row">
           <button type="button" id="tintReset" class="btn ghost">元の色に戻す</button>
+        </div>
+      </details>
+
+      <details class="group" data-kinds="image" hidden>
+        <summary>色味を変える（写真・カラー画像向け）</summary>
+        <p class="note">元の絵柄を残したまま、全体の色あいを変えます。</p>
+        <div class="field">
+          <label for="adjH">色合い <output id="adjHOut">0</output></label>
+          <input type="range" id="adjH" class="hue-range" min="-180" max="180" step="1">
+        </div>
+        <div class="field">
+          <label for="adjS">鮮やかさ <output id="adjSOut">0</output></label>
+          <input type="range" id="adjS" min="-100" max="100" step="1">
+        </div>
+        <div class="field">
+          <label for="adjL">明るさ <output id="adjLOut">0</output></label>
+          <input type="range" id="adjL" min="-100" max="100" step="1">
+        </div>
+        <div class="row">
+          <button type="button" id="adjReset" class="btn ghost">元に戻す</button>
+        </div>
+      </details>
+
+      <details class="group" data-kinds="image" hidden>
+        <summary>特定の色を置き換える</summary>
+        <p class="note">① 下の画像をタップして、変えたい色を選ぶ　② 置き換える色を選ぶ</p>
+        <canvas id="swapPreview" class="bg-preview" aria-label="置き換えたい色を選ぶための元画像"></canvas>
+        <div class="row">
+          <span class="chip" id="swapChip">置き換える色: なし</span>
+          <button type="button" id="swapClear" class="btn ghost">解除</button>
+        </div>
+        <h3 class="sub-h">置き換える色</h3>
+        <div id="swapPicker"></div>
+        <div class="field">
+          <label for="swapTol">色の近さ（大きいほど広く置き換える）</label>
+          <input type="range" id="swapTol" min="0" max="100" step="1">
         </div>
       </details>
 
@@ -175,6 +256,7 @@
       <button type="button" class="tab" role="tab" data-tab="image" aria-selected="true">画像</button>
       <button type="button" class="tab" role="tab" data-tab="text" aria-selected="false">テキスト</button>
       <button type="button" class="tab" role="tab" data-tab="draw" aria-selected="false">手書き</button>
+      <button type="button" class="tab" role="tab" data-tab="stamp" aria-selected="false">スタンプ</button>
     </div>
 
     <div class="tabpane" data-pane="image" role="tabpanel">
@@ -190,6 +272,14 @@
       <span class="pane-note">追加すると右（スマホでは下）のパネルで、文字・フォント・色・縁取りを変えられます。</span>
     </div>
 
+    <div class="tabpane stamp-pane" data-pane="stamp" role="tabpanel" hidden>
+      <div class="seg-mini" id="stampKind">
+        <button type="button" data-kind="shape" aria-pressed="true">図形</button>
+        <button type="button" data-kind="emoji" aria-pressed="false">絵文字</button>
+      </div>
+      <div id="stampTray" class="tray"></div>
+    </div>
+
     <div class="tabpane draw-pane" data-pane="draw" role="tabpanel" hidden>
       <div class="tools" id="tools" role="group" aria-label="手書きのツール">
         <button type="button" data-tool="select" aria-pressed="false">↖ 選択</button>
@@ -201,6 +291,7 @@
       </div>
       <div class="draw-opts">
         <div id="drawColor" class="draw-color"></div>
+        <button type="button" id="drawFill" class="toggle" aria-pressed="false" hidden>塗りつぶし</button>
         <label class="draw-w" id="drawWRow">
           <span id="drawWLabel">太さ</span>
           <input type="range" id="drawW" min="1" max="30" step="1">

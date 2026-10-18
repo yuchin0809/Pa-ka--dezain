@@ -144,7 +144,9 @@ main {
 .h-del { left: -15px; top: -15px; background: var(--danger); cursor: pointer; }
 .h-rot { right: -15px; bottom: -15px; cursor: nwse-resize; }
 
-.msg { min-height: 1.5em; margin: 6px 2px; font-size: 0.85rem; color: var(--muted); }
+.msg-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 6px 2px; }
+.msg { min-height: 1.5em; margin: 0; font-size: 0.85rem; color: var(--muted); }
+.save-state { flex: none; font-size: 0.75rem; color: var(--muted); }
 
 /* --- panel --- */
 .panel {
@@ -181,8 +183,72 @@ main {
 }
 .swatch.on { outline: 3px solid #2563eb; outline-offset: 2px; }
 .swatch:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
-.color-pick { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; }
-.color-pick input { width: 44px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+.cp-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.other-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.other-btn:hover, .other-btn[aria-expanded="true"] { border-color: var(--ink); }
+.other-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.rainbow {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.cp-custom {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfaf5;
+}
+.cp-row { display: grid; grid-template-columns: 4.5em 1fr; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--muted); }
+.cp-row input { width: 100%; margin: 0; }
+.cp-row:first-child input { background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.cp-row input[type="range"] { -webkit-appearance: none; appearance: none; height: 12px; border-radius: 6px; }
+.cp-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.cp-row input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--ink);
+}
+.cp-preview { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--muted); }
+.cp-preview i { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--line); display: inline-block; }
+.recent { display: grid; gap: 4px; margin-top: 8px; }
+.recent[hidden] { display: none; }
+.hue-range { -webkit-appearance: none; appearance: none; height: 12px; border-radius: 6px; background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.hue-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--ink);
+}
+.sub-h { margin: 10px 0 4px; font-size: 0.8rem; color: var(--muted); font-weight: 600; }
 
 .bg-preview {
   display: block;
@@ -239,6 +305,10 @@ main {
 }
 .btn.add { padding: 5px 12px; flex: none; white-space: nowrap; }
 .pane-note { font-size: 0.85rem; color: var(--muted); }
+.stamp-pane .seg-mini { flex: none; }
+.stamp-btn { flex: none; padding: 6px; }
+.stamp-btn canvas { width: 100%; height: 100%; display: block; }
+.emoji-btn { font-size: 1.9rem; line-height: 1; display: grid; place-items: center; }
 #addText { flex: none; white-space: nowrap; }
 
 .tray {
@@ -343,6 +413,7 @@ main {
 .group-box h2 { margin: 0 0 6px; font-size: 0.95rem; }
 .group-box h3 { margin: 10px 0 4px; font-size: 0.8rem; color: var(--muted); font-weight: 600; }
 .group-box .row { margin-top: 10px; }
+.group-box > .field, .group-box > div > .field { margin-top: 10px; }
 .lbl { font-size: 0.85rem; color: var(--muted); }
 #textInput {
   width: 100%;
@@ -388,10 +459,14 @@ main {
 .draw-pane { flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .tools { display: flex; gap: 4px; flex-wrap: wrap; }
 .draw-opts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.draw-color .swatches { gap: 6px; flex-wrap: nowrap; }
+.draw-color .cp-main { gap: 8px; flex-wrap: wrap; }
+.draw-color .swatches { gap: 6px; flex-wrap: wrap; }
 .draw-color .swatch { width: 26px; height: 26px; flex: none; }
-.draw-color { display: flex; align-items: center; gap: 10px; }
-.draw-color .color-pick { font-size: 0.8rem; white-space: nowrap; }
+.draw-color { min-width: 0; max-width: 100%; }
+.draw-opts { max-width: 100%; }
+.tabbar { overflow-x: hidden; }
+.draw-color .recent { grid-template-columns: auto 1fr; align-items: center; margin-top: 6px; }
+.draw-opts { align-items: flex-start; }
 .draw-w { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
 .draw-w input { width: 140px; }
 .hist { display: flex; gap: 6px; margin-left: auto; }
@@ -407,7 +482,7 @@ main {
     align-items: start;
   }
   .toolbar { grid-column: 1 / -1; }
-  .stage, .msg { grid-column: 1; }
+  .stage, .msg-row { grid-column: 1; }
   .panel, .hint {
     grid-column: 2;
     grid-row: 2 / span 3;
@@ -450,15 +525,21 @@ main {
   .stage { border-radius: 8px; }
 }
 
+/* スマホ: 上のボタンを小さめにして、2段に収める */
+@media (max-width: 639px) {
+  .toolbar .btn { padding: 6px 10px; font-size: 0.85rem; }
+  .toolbar { gap: 6px; }
+}
+
 /* 指で触る画面（スマホ・iPad）は、押す部分を大きく */
 @media (pointer: coarse) {
   .btn { min-height: 44px; padding: 8px 16px; }
+  .toolbar .btn { padding: 8px 12px; }
   .seg label span { padding: 10px 18px; }
   .handle { width: 40px; height: 40px; font-size: 20px; }
   .h-del { left: -20px; top: -20px; }
   .h-rot { right: -20px; bottom: -20px; }
   .swatch { width: 40px; height: 40px; }
-  .color-pick input { width: 56px; height: 40px; }
   .group summary { padding: 10px 0; }
   .ch { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
   .thumb-btn { width: 72px; height: 72px; }
@@ -489,7 +570,5 @@ main {
   .tools button, .toggle, .btn { min-height: 34px; padding: 3px 10px; }
   .draw-pane { gap: 4px 12px; }
   .draw-color .swatch { width: 24px; height: 24px; }
-  .draw-color .color-pick { font-size: 0.75rem; }
-  .draw-color .color-pick input { width: 36px; height: 26px; }
   .hist { margin-left: 0; }
 }
