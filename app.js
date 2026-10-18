@@ -3,6 +3,10 @@
 
   const MAX_SRC = 1000; // アップロード画像の長辺の上限(px)
   const DEFAULT_TOL = 20;
+  const SNAP_ROT = 4;       // 回転がこの角度(°)以内なら 0°・90°… に吸着
+  const SNAP_POS_PX = 6;    // 位置がこの距離(px)以内なら整列ガイドに吸着
+  const MIN_CROP = 0.05;    // トリミングで最低限残す割合
+  const HOODIE_CX = [0.2535, 0.729]; // 正面・背面のパーカーの中心線（ステージ幅に対する割合）
   // 追加時の初期位置（ステージ幅に対する割合）
   const SPAWN = { front: { x: 0.31, y: 0.17 }, back: { x: 0.734, y: 0.22 } };
   const PRESETS = [
@@ -24,7 +28,7 @@
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   const stageW = () => stage.clientWidth;
   const stageRatio = () => stage.clientHeight / stage.clientWidth;
-  const aspectOf = (item) => item.upload.canvas.height / item.upload.canvas.width;
+  const aspectOf = (item) => item.canvas.height / item.canvas.width;
   const side = () => document.querySelector('input[name="side"]:checked').value;
   const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 
@@ -143,10 +147,15 @@
   function processItem(item) {
     const src = item.upload.canvas;
     const c = item.canvas;
-    c.width = src.width;
-    c.height = src.height;
+    const k = item.crop;
+    const sx = Math.min(src.width - 1, Math.round(k.l * src.width));
+    const sy = Math.min(src.height - 1, Math.round(k.t * src.height));
+    const cw = Math.max(1, Math.min(src.width - sx, Math.round((1 - k.l - k.r) * src.width)));
+    const ch = Math.max(1, Math.min(src.height - sy, Math.round((1 - k.t - k.b) * src.height)));
+    c.width = cw;
+    c.height = ch;
     const ctx = c.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(src, 0, 0);
+    ctx.drawImage(src, sx, sy, cw, ch, 0, 0, cw, ch);
     if (!item.bg && !item.tint) return;
 
     const img = ctx.getImageData(0, 0, c.width, c.height);
@@ -209,6 +218,7 @@
       upload,
       x: 0.3, y: 0.17, w: 0.14, rot: 0,
       tint: null, bg: null, tol: DEFAULT_TOL,
+      crop: { l: 0, t: 0, r: 0, b: 0 },
       canvas: document.createElement('canvas'),
       el: document.createElement('div'),
       ...props,
@@ -254,6 +264,60 @@
     syncPanel();
   }
 
+  /* 整列ガイド */
+  const guideV = $('#guideV');
+  const guideH = $('#guideH');
+  const guideR = $('#guideR');
+
+  function hideGuides() {
+    guideV.hidden = guideH.hidden = guideR.hidden = true;
+  }
+
+  function showGuides(gx, gy) {
+    const s = stageW();
+    guideV.hidden = gx === null;
+    guideH.hidden = gy === null;
+    if (gx !== null) guideV.style.left = `${gx * s}px`;
+    if (gy !== null) guideH.style.top = `${gy * s}px`;
+  }
+
+  // 水平・垂直に吸着したときに、中心を通る線を出す
+  function showRotGuide(item, deg) {
+    const s = stageW();
+    guideR.hidden = false;
+    guideR.style.left = `${item.x * s}px`;
+    guideR.style.top = `${item.y * s}px`;
+    guideR.style.width = `${s * 3}px`;
+    guideR.style.transform = `translate(-50%, -50%) rotate(${deg}deg)`;
+  }
+
+  function snapAngle(r) {
+    const m = Math.round(r / 90) * 90;
+    return Math.abs(r - m) <= SNAP_ROT ? m : null;
+  }
+
+  // 回転を含めた外接四角の半分の大きさ（ステージ幅に対する割合）
+  function halfExtents(item) {
+    const w = item.w;
+    const h = item.w * aspectOf(item);
+    const r = (item.rot * Math.PI) / 180;
+    const c = Math.abs(Math.cos(r));
+    const sn = Math.abs(Math.sin(r));
+    return { hw: (w * c + h * sn) / 2, hh: (w * sn + h * c) / 2 };
+  }
+
+  // edges: 左右(上下)の端と中心を揃える候補 / centers: 中心だけを揃える候補
+  function snapAxis(center, half, edges, centers, thr) {
+    let best = null;
+    const tryLine = (target, offset) => {
+      const d = target - (center + offset);
+      if (Math.abs(d) <= thr && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, line: target };
+    };
+    for (const t of edges) for (const off of [-half, 0, half]) tryLine(t, off);
+    for (const t of centers) tryLine(t, 0);
+    return best;
+  }
+
   function startMove(e, item) {
     e.preventDefault();
     select(item);
@@ -262,11 +326,31 @@
     const sx = e.clientX, sy = e.clientY, ox = item.x, oy = item.y;
     const move = (ev) => {
       const s = stageW();
-      item.x = clamp(ox + (ev.clientX - sx) / s, 0, 1);
-      item.y = clamp(oy + (ev.clientY - sy) / s, 0, stageRatio());
+      let nx = clamp(ox + (ev.clientX - sx) / s, 0, 1);
+      let ny = clamp(oy + (ev.clientY - sy) / s, 0, stageRatio());
+      let gx = null, gy = null;
+      if (!ev.altKey) {
+        const thr = SNAP_POS_PX / s;
+        const { hw, hh } = halfExtents(item);
+        const exs = [], eys = [];
+        for (const o of state.items) {
+          if (o === item) continue;
+          const b = halfExtents(o);
+          exs.push(o.x - b.hw, o.x, o.x + b.hw);
+          eys.push(o.y - b.hh, o.y, o.y + b.hh);
+        }
+        const bx = snapAxis(nx, hw, exs, HOODIE_CX, thr);
+        const by = snapAxis(ny, hh, eys, [], thr);
+        if (bx) { nx += bx.d; gx = bx.line; }
+        if (by) { ny += by.d; gy = by.line; }
+      }
+      item.x = nx;
+      item.y = ny;
       layout(item);
+      showGuides(gx, gy);
     };
     const end = () => {
+      hideGuides();
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', end);
       el.removeEventListener('pointercancel', end);
@@ -295,11 +379,15 @@
       item.w = clamp(w0 * d / d0, 0.03, 1);
       let r = r0 + ((a - a0) * 180) / Math.PI;
       r = ((r + 540) % 360) - 180;
-      item.rot = Math.round(r);
+      r = Math.round(r);
+      const m = ev.altKey ? null : snapAngle(r);
+      if (m !== null) { r = m; showRotGuide(item, m); } else { guideR.hidden = true; }
+      item.rot = r;
       layout(item);
       syncSliders();
     };
     const end = () => {
+      hideGuides();
       h.removeEventListener('pointermove', move);
       h.removeEventListener('pointerup', end);
       h.removeEventListener('pointercancel', end);
@@ -328,6 +416,7 @@
   /* ---------- 設定パネル ---------- */
 
   const sizeInput = $('#size');
+  const rotOut = $('#rotOut');
   const rotInput = $('#rot');
   const tintInput = $('#tint');
   const tolInput = $('#tol');
@@ -351,6 +440,7 @@
     if (!item) return;
     sizeInput.value = String(Math.round(item.w * 100));
     rotInput.value = String(item.rot);
+    rotOut.textContent = `${item.rot}°`;
   }
 
   function drawBgPreview(item) {
@@ -378,7 +468,99 @@
       bgChip.textContent = '透明にする色: なし';
     }
     drawBgPreview(item);
+    drawCrop(item);
   }
+
+  /* ---------- トリミング ---------- */
+
+  const cropBox = $('#crop');
+  const cropImg = $('#cropImg');
+  const cropRect = $('#cropRect');
+
+  function drawCrop(item) {
+    const src = item.upload.canvas;
+    const k = Math.min(280 / src.width, 200 / src.height);
+    cropImg.width = Math.max(1, Math.round(src.width * k));
+    cropImg.height = Math.max(1, Math.round(src.height * k));
+    cropImg.getContext('2d').drawImage(src, 0, 0, cropImg.width, cropImg.height);
+    updateCropUI(item);
+  }
+
+  function updateCropUI(item) {
+    const c = item.crop;
+    const pct = (v) => `${v * 100}%`;
+    Object.assign(cropRect.style, { left: pct(c.l), top: pct(c.t), right: pct(c.r), bottom: pct(c.b) });
+    Object.assign($('#dimT').style, { left: '0', top: '0', right: '0', height: pct(c.t) });
+    Object.assign($('#dimB').style, { left: '0', bottom: '0', right: '0', height: pct(c.b) });
+    Object.assign($('#dimL').style, { left: '0', top: pct(c.t), bottom: pct(c.b), width: pct(c.l) });
+    Object.assign($('#dimR').style, { right: '0', top: pct(c.t), bottom: pct(c.b), width: pct(c.r) });
+  }
+
+  // 切り取った後も、残った部分が同じ大きさ・同じ場所に見えるように位置と大きさを直す
+  function applyCrop(item, next) {
+    const src = item.upload.canvas;
+    const a0 = src.height / src.width;
+    const o = item.crop;
+    const k = item.w / (1 - o.l - o.r); // 元画像の全幅（ステージ幅に対する割合）
+    const off = (c) => ({
+      x: ((c.l + 1 - c.r) / 2 - 0.5) * k,
+      y: ((c.t + 1 - c.b) / 2 - 0.5) * k * a0,
+    });
+    const p = off(o), q = off(next);
+    const dx = q.x - p.x, dy = q.y - p.y;
+    const r = (item.rot * Math.PI) / 180;
+    item.x += dx * Math.cos(r) - dy * Math.sin(r);
+    item.y += dx * Math.sin(r) + dy * Math.cos(r);
+    item.w = k * (1 - next.l - next.r);
+    item.crop = next;
+    processItem(item);
+    layout(item);
+    syncSliders();
+    updateCropUI(item);
+  }
+
+  cropRect.addEventListener('pointerdown', (e) => {
+    const item = state.selected;
+    if (!item) return;
+    e.preventDefault();
+    const edge = e.target.dataset.e || 'move';
+    cropRect.setPointerCapture(e.pointerId);
+    const box = cropBox.getBoundingClientRect();
+    const start = { ...item.crop };
+    const sx = e.clientX, sy = e.clientY;
+    const move = (ev) => {
+      const dx = (ev.clientX - sx) / box.width;
+      const dy = (ev.clientY - sy) / box.height;
+      const n = { ...start };
+      if (edge === 'move') {
+        const w = 1 - start.l - start.r;
+        const h = 1 - start.t - start.b;
+        n.l = clamp(start.l + dx, 0, 1 - w);
+        n.r = 1 - w - n.l;
+        n.t = clamp(start.t + dy, 0, 1 - h);
+        n.b = 1 - h - n.t;
+      } else {
+        if (edge.includes('w')) n.l = clamp(start.l + dx, 0, 1 - start.r - MIN_CROP);
+        if (edge.includes('e')) n.r = clamp(start.r - dx, 0, 1 - start.l - MIN_CROP);
+        if (edge.includes('n')) n.t = clamp(start.t + dy, 0, 1 - start.b - MIN_CROP);
+        if (edge.includes('s')) n.b = clamp(start.b - dy, 0, 1 - start.t - MIN_CROP);
+      }
+      applyCrop(item, n);
+    };
+    const end = () => {
+      cropRect.removeEventListener('pointermove', move);
+      cropRect.removeEventListener('pointerup', end);
+      cropRect.removeEventListener('pointercancel', end);
+    };
+    cropRect.addEventListener('pointermove', move);
+    cropRect.addEventListener('pointerup', end);
+    cropRect.addEventListener('pointercancel', end);
+  });
+
+  $('#cropReset').addEventListener('click', () => {
+    const item = state.selected;
+    if (item) applyCrop(item, { l: 0, t: 0, r: 0, b: 0 });
+  });
 
   function setTint(hex) {
     const item = state.selected;
@@ -402,8 +584,22 @@
   rotInput.addEventListener('input', () => {
     const item = state.selected;
     if (!item) return;
-    item.rot = Number(rotInput.value);
+    let r = Number(rotInput.value);
+    const m = snapAngle(r);
+    if (m !== null) { r = m; rotInput.value = String(m); }
+    item.rot = r;
+    rotOut.textContent = `${r}°`;
     layout(item);
+    if (m !== null) showRotGuide(item, m); else hideGuides();
+  });
+  rotInput.addEventListener('change', hideGuides);
+  $('#level').addEventListener('click', () => {
+    const item = state.selected;
+    if (!item) return;
+    item.rot = 0;
+    layout(item);
+    syncSliders();
+    say('水平にしました。');
   });
   tintInput.addEventListener('input', () => setTint(tintInput.value));
   $('#tintReset').addEventListener('click', () => {
@@ -472,6 +668,7 @@
     const { upload, w, rot, tint, bg, tol } = item;
     select(createItem(upload, {
       w, rot, tint, bg, tol,
+      crop: { ...item.crop },
       x: clamp(item.x + 0.02, 0, 1),
       y: clamp(item.y + 0.02, 0, stageRatio()),
     }));
@@ -533,4 +730,11 @@
   }).observe(stage);
 
   renderTray();
+
+  // ホーム画面に追加したあと、オフラインでも開けるようにする
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
 })();

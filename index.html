@@ -2,15 +2,22 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>クラスパーカーデザイン</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7d51d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="1-Iパーカ">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <title>1-Iクラスパーカデザインメーカー</title>
   <meta name="description" content="クラスパーカーのデザインを、画像を重ねて試せるサイト">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23f7d51d'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
-    <h1>クラスパーカー デザインメーカー</h1>
+    <h1>1-Iクラスパーカデザインメーカー</h1>
     <p>下のタブから画像を追加して、パーカーに重ねて試してみよう</p>
   </header>
 
@@ -28,6 +35,9 @@
 
     <div id="stage" class="stage">
       <img id="hoodie" src="images/hoodie.jpg" alt="黄色のパーカー（左が正面、右が背面）" draggable="false">
+      <div class="guide v" id="guideV" hidden></div>
+      <div class="guide h" id="guideH" hidden></div>
+      <div class="guide r" id="guideR" hidden></div>
       <div id="sel" class="sel" hidden>
         <button type="button" class="handle h-del" id="hDel" aria-label="このデザインを削除">×</button>
         <div class="handle h-rot" id="hRot" role="presentation" title="ドラッグで拡大縮小・回転">⤡</div>
@@ -37,8 +47,9 @@
 
     <aside id="hint" class="hint">
       <h2>デザインの調整</h2>
-      <p>パーカー上のデザインをタップすると、ここで大きさ・回転・色・背景の透明化を調整できます。</p>
+      <p>パーカー上のデザインをタップすると、ここで大きさ・回転・色・背景の透明化・トリミングを調整できます。</p>
       <p>右下の丸いハンドルをドラッグすると拡大縮小と回転、左上の×で削除できます。</p>
+      <p>動かしている間、パーカーの中心や他のデザインに近づくと、ぴたっと揃います。</p>
     </aside>
 
     <section id="panel" class="panel" hidden aria-label="選択中のデザインの設定">
@@ -47,12 +58,15 @@
         <input type="range" id="size" min="3" max="100" step="1">
       </div>
       <div class="field">
-        <label for="rot">回転</label>
-        <input type="range" id="rot" min="-180" max="180" step="1">
+        <label for="rot">回転 <output id="rotOut">0°</output></label>
+        <div class="rot-row">
+          <input type="range" id="rot" min="-180" max="180" step="1">
+          <button type="button" id="level" class="btn ghost">水平にする</button>
+        </div>
       </div>
 
-      <div class="group">
-        <h2>色を変える</h2>
+      <details class="group">
+        <summary>色を変える</summary>
         <p class="note">画像の形（透明な部分と、透明にした背景以外）を一色で塗ります。</p>
         <div class="swatches" id="presets"></div>
         <div class="row">
@@ -61,10 +75,10 @@
           </label>
           <button type="button" id="tintReset" class="btn ghost">元の色に戻す</button>
         </div>
-      </div>
+      </details>
 
-      <div class="group">
-        <h2>背景を透明にする</h2>
+      <details class="group">
+        <summary>背景を透明にする</summary>
         <p class="note">下の画像をクリックして、透明にしたい色（白でも他の色でも）を選びます。</p>
         <canvas id="bgPreview" class="bg-preview" aria-label="透明にする色を選ぶための元画像"></canvas>
         <div class="row">
@@ -76,7 +90,27 @@
           <label for="tol">色の近さ（大きいほど広く透明に）</label>
           <input type="range" id="tol" min="0" max="100" step="1">
         </div>
-      </div>
+      </details>
+
+      <details class="group" id="cropGroup">
+        <summary>トリミング</summary>
+        <p class="note">四角の枠の辺や角をドラッグして、残したい範囲を選びます。枠の中をドラッグすると枠ごと動かせます。</p>
+        <div class="crop" id="crop">
+          <canvas id="cropImg"></canvas>
+          <div class="crop-dim" id="dimT"></div>
+          <div class="crop-dim" id="dimB"></div>
+          <div class="crop-dim" id="dimL"></div>
+          <div class="crop-dim" id="dimR"></div>
+          <div class="crop-rect" id="cropRect">
+            <span class="ch" data-e="nw"></span><span class="ch" data-e="n"></span><span class="ch" data-e="ne"></span>
+            <span class="ch" data-e="w"></span><span class="ch" data-e="e"></span>
+            <span class="ch" data-e="sw"></span><span class="ch" data-e="s"></span><span class="ch" data-e="se"></span>
+          </div>
+        </div>
+        <div class="row">
+          <button type="button" id="cropReset" class="btn ghost">トリミングをやり直す</button>
+        </div>
+      </details>
 
       <div class="row actions">
         <button type="button" id="toFront" class="btn ghost">手前へ</button>
