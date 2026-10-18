@@ -71,6 +71,11 @@
 - `images/hoodie.jpg` … パーカーの画像
 - `manifest.webmanifest` / `sw.js` / `icons/` … ホーム画面追加・オフライン用
 
+### サイトを更新するときの注意
+`sw.js` の先頭にある `CACHE`（例: `parka-v5`）の名前を、ファイルを変えるたびに変えてください。
+名前を変えると、新しいファイルが裏で保存され、利用者が次に開いたときから新しくなります
+（変えないと、端末に保存された古いファイルが使われ続けます）。
+
 ## GitHub Pages で公開する
 
 リポジトリの Settings → Pages → Build and deployment で、

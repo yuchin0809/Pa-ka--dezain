@@ -5,6 +5,7 @@
 
   const MAX_SRC = 1000;      // アップロード画像の長辺の上限(px)
   const DEFAULT_TOL = 20;
+  const DRAFT_PX = 420;      // スライダー操作中の画像処理に使う、小さい版の長辺(px)
   const SNAP_ROT = 4;        // 回転がこの角度(°)以内なら 0°・90°… に吸着
   const SNAP_POS_PX = 6;     // 位置がこの距離(px)以内なら整列ガイドに吸着
   const MIN_CROP = 0.05;     // トリミングで最低限残す割合
@@ -12,9 +13,9 @@
   // 追加時の初期位置（ステージ幅に対する割合）
   const SPAWN = { front: { x: 0.31, y: 0.17 }, back: { x: 0.734, y: 0.22 } };
 
-  // 文字・線の画像は「ステージ幅 = RENDER_W px」の細かさで描く（高解像度の画面とPNG保存のため）
-  const RENDER_W = 3000;
-  const MAX_PX = 4096;
+  // 文字・線の画像は「ステージ幅 = RENDER_W px」の細かさで描く（PNG保存は1949px幅なので、それ以上は不要）
+  const RENDER_W = 2000;
+  const MAX_PX = 2560;
   const MIN_EXT = 0.004;     // 線の図形の最小サイズ（ステージ幅に対する割合）
   const LW_UNIT = 0.0015;    // 線の太さスライダー1目盛りぶん
   const ER_UNIT = 0.003;     // 消しゴムの大きさスライダー1目盛りぶん
@@ -341,7 +342,7 @@
   function snapshotOf(item) {
     const out = {};
     for (const [k, v] of Object.entries(item)) {
-      if (k === 'el' || k === 'canvas') continue;
+      if (k === 'el' || k === 'canvas' || k === 'draft') continue;
       out[k] = k === 'paths' || k === 'upload' ? v : cloneValue(v);
     }
     return out;
@@ -372,13 +373,25 @@
     scheduleSave();
   }
 
+  // 履歴の状態に戻す。変わっていないデザインは作りなおさず、そのまま使う（作りなおしは重いため）
   function restore(snaps) {
     const prevId = state.selected && state.selected.id;
-    for (const it of state.items) it.el.remove();
+    const old = new Map(state.items.map((it) => [it.id, it]));
     state.items = [];
     state.selected = null;
-    // 履歴の中身を直接いじらないよう、コピーして使う
-    for (const snap of snaps) createItem(snapshotOf(snap));
+    for (const snap of snaps) {
+      const cur = old.get(snap.id);
+      if (cur && signature(snapshotOf(cur)) === signature(snap)) {
+        state.items.push(cur);
+        old.delete(snap.id);
+      } else {
+        // 履歴の中身を直接いじらないよう、コピーして使う
+        createItem(snapshotOf(snap));
+      }
+    }
+    for (const it of old.values()) it.el.remove();
+    for (const it of state.items) stage.insertBefore(it.el, itemAnchor); // HTMLの並びも重なり順に合わせる
+    restack();
     select(state.items.find((it) => it.id === prevId) || null);
   }
 
@@ -519,9 +532,35 @@
 
   const luma = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
 
+  function hue2rgb(p, q, t) {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  }
+
+  // スライダーを動かしている間に使う、小さい版の画像（長辺 DRAFT_PX）
+  function draftSource(upload) {
+    const src = upload.canvas;
+    if (Math.max(src.width, src.height) <= DRAFT_PX) return src;
+    if (!upload.small) {
+      const k = DRAFT_PX / Math.max(src.width, src.height);
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(src.width * k));
+      c.height = Math.max(1, Math.round(src.height * k));
+      c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+      upload.small = c;
+    }
+    return upload.small;
+  }
+
   // 色の処理の順番: 背景を透明に → 特定の色の置き換え → 色味 → 一色に塗る
-  function processItem(item) {
-    const src = item.upload.canvas;
+  // draft が true なら小さい版で素早く処理する（スライダーを動かしている間用。離したら本番の大きさで処理しなおす）
+  function processItem(item, draft = false) {
+    const src = draft ? draftSource(item.upload) : item.upload.canvas;
+    item.draft = draft && src !== item.upload.canvas;
     const c = item.canvas;
     const k = item.crop;
     const sx = Math.min(src.width - 1, Math.round(k.l * src.width));
@@ -539,6 +578,7 @@
 
     const img = ctx.getImageData(0, 0, c.width, c.height);
     const d = img.data;
+    const bg = item.bg;
     const thr = item.tol * 3; // 色距離(0〜441)のしきい値
     const inner = thr * 0.6;  // これ以下は完全に透明、thrまでは境界をなだらかに
     const tint = item.tint ? hexToRgb(item.tint) : null;
@@ -546,13 +586,14 @@
     const swTo = sw ? hexToRgb(sw.to) : null;
     const swThr = sw ? Math.max(1, sw.tol * 3) : 0;
     const swLum = sw ? Math.max(8, luma(sw.from.r, sw.from.g, sw.from.b)) : 0;
+    const dh = adj.h, ds = 1 + adj.s / 100, dl = adj.l;
 
     for (let i = 0; i < d.length; i += 4) {
       let a = d[i + 3];
       if (a === 0) continue;
       let r = d[i], g = d[i + 1], b = d[i + 2];
-      if (item.bg) {
-        const dist = Math.hypot(r - item.bg.r, g - item.bg.g, b - item.bg.b);
+      if (bg) {
+        const dist = Math.hypot(r - bg.r, g - bg.g, b - bg.b);
         if (dist <= inner) a = 0;
         else if (dist < thr) a = a * (dist - inner) / (thr - inner);
         d[i + 3] = a;
@@ -570,11 +611,31 @@
         }
       }
       if (adjOn) {
-        let [h, sat, l] = rgbToHsl(r, g, b);
-        h = (h + adj.h + 360) % 360;
-        sat = clamp(sat * (1 + adj.s / 100), 0, 1);
-        l = adj.l >= 0 ? l + (1 - l) * (adj.l / 100) : l * (1 + adj.l / 100);
-        [r, g, b] = hslToRgb(h, sat, l);
+        // RGB → HSL → 調整 → RGB（1画素ごとに配列を作らないよう、手で展開している）
+        const rr = r / 255, gg = g / 255, bb = b / 255;
+        const mx = Math.max(rr, gg, bb), mn = Math.min(rr, gg, bb);
+        let l = (mx + mn) / 2;
+        let h = 0, sat = 0;
+        if (mx !== mn) {
+          const dd = mx - mn;
+          sat = l > 0.5 ? dd / (2 - mx - mn) : dd / (mx + mn);
+          if (mx === rr) h = (gg - bb) / dd + (gg < bb ? 6 : 0);
+          else if (mx === gg) h = (bb - rr) / dd + 2;
+          else h = (rr - gg) / dd + 4;
+          h /= 6;
+        }
+        h = (h + dh / 360 + 1) % 1;
+        sat = Math.min(1, Math.max(0, sat * ds));
+        l = dl >= 0 ? l + (1 - l) * (dl / 100) : l * (1 + dl / 100);
+        if (sat === 0) {
+          r = g = b = l * 255;
+        } else {
+          const q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat;
+          const p = 2 * l - q;
+          r = hue2rgb(p, q, h + 1 / 3) * 255;
+          g = hue2rgb(p, q, h) * 255;
+          b = hue2rgb(p, q, h - 1 / 3) * 255;
+        }
       }
       if (tint) { r = tint[0]; g = tint[1]; b = tint[2]; }
       d[i] = r;
@@ -589,32 +650,64 @@
     if (pending.has(item)) return;
     pending.add(item);
     requestAnimationFrame(() => {
-      pending.delete(item);
-      processItem(item);
+      if (pending.delete(item)) processItem(item, true);
     });
+  }
+
+  // スライダーを離したときなど、小さい版で処理した画像を本番の大きさで処理しなおす
+  function finishDrafts() {
+    const waiting = [...pending];
+    pending.clear();
+    for (const it of waiting) processItem(it);
+    for (const it of state.items) if (it.kind === 'image' && it.draft) processItem(it);
   }
 
   /* ---------- テキストの描画 ---------- */
 
   const measureCtx = document.createElement('canvas').getContext('2d');
-  const fontsAsked = new Set();
-
   const fontSpec = (item, size) => `${item.bold ? 700 : 400} ${size}px "${item.font}", "Hiragino Sans", "Yu Gothic", sans-serif`;
 
-  // 使うフォントを読み込んでから描きなおす（読み込み前はほかの字体で描かれてしまうため）
+  // フォントは Google Fonts から、使う文字だけを必要になったときに読み込む
+  // （全部入りのスタイルシートは約2MBあり、読み込みも解析も重いため）
+  const BOLD_FONTS = new Set(['Noto Sans JP', 'Noto Serif JP', 'Zen Maru Gothic', 'M PLUS Rounded 1c']); // 太字がある
+  const fontChars = new Map();  // フォント名 → これまでに頼んだ文字
+  const fontLoads = new Map();  // フォント名 → { link, ready }
+  const fontTimers = new Map();
+
+  // family の text に含まれる文字を使えるようにする。頼んだ文字は積み重ねる（あとの定義が前の定義を置き換えるため）
+  function loadFontChars(family, text) {
+    let chars = fontChars.get(family);
+    if (!chars) { chars = new Set(); fontChars.set(family, chars); }
+    const before = chars.size;
+    for (const ch of text) if (ch.trim()) chars.add(ch);
+    const cur = fontLoads.get(family);
+    if (cur && chars.size === before) return cur.ready;
+    if (!chars.size) return Promise.resolve();
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.crossOrigin = 'anonymous';
+    link.href = `https://fonts.googleapis.com/css2?family=${family.replace(/ /g, '+')}${BOLD_FONTS.has(family) ? ':wght@400;700' : ''}`
+      + `&text=${encodeURIComponent([...chars].join(''))}&display=swap`;
+    const ready = new Promise((resolve) => { link.onload = resolve; link.onerror = resolve; });
+    document.head.append(link);
+    fontLoads.set(family, { link, ready });
+    if (cur) ready.then(() => cur.link.remove());
+    return ready;
+  }
+
+  // 使うフォント・文字がまだ読み込まれていなければ、少し待ってから（入力中は何度も頼まないよう）読み込み、描きなおす
   function ensureFont(item) {
-    if (!document.fonts) return;
-    const key = `${item.bold}|${item.font}|${item.text}`;
-    if (fontsAsked.has(key)) return;
-    fontsAsked.add(key);
-    document.fonts.load(fontSpec(item, TEXT_REF), item.text || 'あ')
-      .catch(() => {})
-      .then(() => {
-        for (const it of state.items) {
-          if (it.kind === 'text' && it.font === item.font) refresh(it);
-        }
-        if (state.selected) syncSliders();
-      });
+    const family = item.font;
+    const chars = fontChars.get(family);
+    if (chars && fontLoads.has(family) && [...item.text].every((ch) => !ch.trim() || chars.has(ch))) return;
+    clearTimeout(fontTimers.get(family));
+    fontTimers.set(family, setTimeout(async () => {
+      const users = state.items.filter((it) => it.kind === 'text' && it.font === family);
+      await loadFontChars(family, users.map((it) => it.text).join(''));
+      try { await document.fonts.load(fontSpec(item, TEXT_REF), item.text || 'あ'); } catch { /* 読めなければ端末のフォントで描く */ }
+      for (const it of users) if (state.items.includes(it)) refresh(it);
+      if (state.selected) syncSliders();
+    }, 150));
   }
 
   // 基準サイズ(TEXT_REF)でのレイアウト。大きさ nw×nh と、描く関数 draw(ctx, k) を返す。
@@ -1273,9 +1366,14 @@
   });
 
   // パネルの操作が終わったら履歴に残す（変化がなければ残らない）
-  panel.addEventListener('change', commit);
+  panel.addEventListener('change', () => {
+    finishDrafts();
+    commit();
+  });
   panel.addEventListener('click', (e) => {
-    if (e.target.closest('button')) commit();
+    if (!e.target.closest('button')) return;
+    finishDrafts();
+    commit();
   });
 
   /* ---------- 設定パネル（画像） ---------- */
@@ -1332,9 +1430,15 @@
     swapChip.replaceChildren(colorChip('置き換える色: ', item.swap && item.swap.from));
     swapTol.value = String(item.swap ? item.swap.tol : DEFAULT_TOL);
     swapPicker.set(item.swap ? item.swap.to : null);
-    drawPreview(bgPreview, item);
-    drawPreview(swapPreview, item);
-    drawCrop(item);
+    if (bgPreview.dataset.up !== String(item.upload.id)) {
+      // 元画像の見本は、別の画像を選んだときだけ描きなおす
+      bgPreview.dataset.up = String(item.upload.id);
+      drawPreview(bgPreview, item);
+      drawPreview(swapPreview, item);
+      drawCrop(item);
+    } else {
+      updateCropUI(item);
+    }
   }
 
   // プレビュー画像をタップした場所の色を取り出す（もともと透明な所は null）
@@ -1364,7 +1468,7 @@
       }
     }
     item.tint = hex;
-    processItem(item);
+    scheduleProcess(item);
     syncImagePanel(item);
   }
 
@@ -1575,7 +1679,13 @@
     syncSliders();
   }
 
+  let chipFontsRequested = false;
   function syncTextPanel(item) {
+    if (!chipFontsRequested) {
+      // フォント見本の文字だけを、フォントごとに小さく読み込む
+      chipFontsRequested = true;
+      setTimeout(() => { for (const [family, label] of FONTS) loadFontChars(family, label); }, 300);
+    }
     if (textInput.dataset.itemId !== String(item.id) || document.activeElement !== textInput) {
       textInput.value = item.text;
       textInput.dataset.itemId = String(item.id);
@@ -1790,11 +1900,31 @@
   }
 
   // 消しゴム: 丸い範囲の中にある点を取り除き、線を途中で切る
+  // 線（点をつないだもの）が、点 (qx, qy) の半径 rr 以内を通るか。配列を作らずに調べる
+  function pathNear(path, qx, qy, rr) {
+    const r2 = rr * rr;
+    let ax = path[0][0], ay = path[0][1];
+    if ((ax - qx) ** 2 + (ay - qy) ** 2 <= r2) return true;
+    for (let i = 1; i < path.length; i++) {
+      const bx = path[i][0], by = path[i][1];
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 ? ((qx - ax) * dx + (qy - ay) * dy) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const px = ax + dx * t - qx, py = ay + dy * t - qy;
+      if (px * px + py * py <= r2) return true;
+      ax = bx;
+      ay = by;
+    }
+    return false;
+  }
+
   function erasePaths(paths, q, rr) {
     const step = rr / 2;
     const out = [];
     let changed = false;
     for (const path of paths) {
+      if (!pathNear(path, q[0], q[1], rr)) { out.push(path); continue; }
       const pts = [];
       path.forEach((p, i) => {
         if (i > 0) {
@@ -1914,6 +2044,7 @@
     state.tab = name;
     for (const t of tabBtns) t.setAttribute('aria-selected', String(t.dataset.tab === name));
     for (const p of panes) p.hidden = p.dataset.pane !== name;
+    if (name === 'stamp' && !stampTray.childElementCount) renderStampTray('shape'); // 初めて開くときに作る
     updateMode();
   }
   for (const t of tabBtns) t.addEventListener('click', () => setTab(t.dataset.tab));
@@ -1998,6 +2129,7 @@
   // 「保存」も「共有」も、まず共有画面を開く。
   // iPhone / iPad では共有画面の「画像を保存」で写真アプリに入る。開けない端末ではダウンロードにする
   async function exportImage(mode) {
+    finishDrafts();
     let blob;
     try {
       blob = await canvasToBlob(renderDesign());
@@ -2176,7 +2308,6 @@
 
   async function start() {
     renderTray();
-    renderStampTray('shape');
     setTool('pen');
     setTab('image');
     drawColor.set(state.pen.color);

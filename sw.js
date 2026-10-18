@@ -1,7 +1,9 @@
-// オフラインでも使えるように、サイトのファイルとフォントを端末に保存しておく。
-// サイトのファイルは、ネットにつながっているときは常に最新を取りにいき、つながらないときだけ保存分を使う。
-// フォント（Google Fonts）は、保存分があればそれを使い、裏で最新に更新する。
-const CACHE = 'parka-v4';
+// オフラインでも、ネットが遅くてもすぐ開けるように、サイトのファイルとフォントを端末に保存しておく。
+//
+// - サイトのファイルは、保存済みのものを先に使う（ネットを待たない）。
+//   サイトを更新したときは、下の CACHE の名前を変える。すると新しいファイルが裏で保存され、次に開いたときから新しくなる。
+// - フォント（Google Fonts）は、保存分があればそれを使い、裏で最新に更新する。
+const CACHE = 'parka-v5';
 const FONT_CACHE = 'parka-fonts-v1';
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 const FILES = [
@@ -18,7 +20,12 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' で、ブラウザ側の古い保存を使わず、いつも最新のファイルを取りにいく
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -38,6 +45,7 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       caches.open(FONT_CACHE).then(async (cache) => {
         const hit = await cache.match(req);
+        if (hit && url.hostname === 'fonts.gstatic.com') return hit; // フォントのファイルは中身が変わらないので、保存分をそのまま使う
         const fresh = fetch(req)
           .then((res) => {
             if (res.ok) cache.put(req, res.clone());
@@ -52,14 +60,6 @@ self.addEventListener('fetch', (e) => {
 
   if (url.origin !== location.origin) return;
   e.respondWith(
-    fetch(req)
-      .then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match('index.html')))
+    caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).catch(() => caches.match('index.html')))
   );
 });
